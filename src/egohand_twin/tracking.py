@@ -88,6 +88,12 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "side_probability_right_smoothed": track.p_right,
         "detection_index": detection.index if detection else None,
         "detection_origin": detection.origin if detection else None,
+        "detection_origin_detail": detection.origin_detail if detection else None,
+        # Offline anatomical identity is not known while processing; `egohand identity
+        # --write-jsonl` writes a separate file with track-level votes.
+        "anatomical_side": "unknown",
+        # No calibrated hand-level confidence exists; never copied from handedness_score.
+        "confidence": None,
         "raw_side": detection.side if detection else None,
         "handedness_score": detection.handedness_score if detection else None,
         "image_xyz_raw": detection.image.tolist() if detection else None,
@@ -95,6 +101,17 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "image_xyz": image.tolist() if image is not None else None,
         "world_xyz_m": world.tolist() if world is not None else None,
     }
+    # Schema provenance vocabulary: "predicted" = output of a learned model (MediaPipe),
+    # "inferred" = produced by a rule (filtering, extrapolation, voting), "measured" = direct
+    # measurement. Not to be confused with the tracker state "predicted".
+    if detection is not None:
+        out["provenance"] = {"image_xyz_raw": "predicted", "world_xyz_m_raw": "predicted",
+                             "image_xyz": "inferred", "world_xyz_m": "inferred",
+                             "side": "inferred", "handedness_score": "predicted"}
+    elif image is not None:
+        out["provenance"] = {"image_xyz": "inferred", "missing_reason": "inferred", "side": "inferred"}
+    else:
+        out["provenance"] = {"missing_reason": "inferred", "side": "inferred"}
     if detection is None:
         reason, basis = missing_reason(track, age)
         out["missing_reason"], out["missing_reason_basis"] = reason, basis

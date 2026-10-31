@@ -79,6 +79,22 @@ HAND_REASONS = {"observation_gap", "low_coverage", "track_fragmentation", "side_
                 "landmark_jump", "hand_at_image_edge", "bone_length_inconsistency"}
 
 
+def frame_stats(bgr: np.ndarray, analysis_width: int = 320) -> tuple[np.ndarray, dict]:
+    """Cheap global statistics of one frame on an area-downscaled grayscale copy.
+
+    blur_laplacian_var: variance of the Laplacian (higher = sharper; texture-dependent,
+    so compare within a clip). mean_luma: mean 8-bit gray level (0-255). Exposure
+    fractions: share of pixels >= 250 or <= 15. Returns (gray, stats).
+    """
+    h, w = bgr.shape[:2]
+    small = cv2.resize(bgr, (analysis_width, round(h*analysis_width/w)), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    return gray, {"blur_laplacian_var": float(cv2.Laplacian(gray, cv2.CV_64F).var()),
+                  "mean_luma": float(gray.mean()),
+                  "overexposed_fraction": float(np.mean(gray >= 250)),
+                  "underexposed_fraction": float(np.mean(gray <= 15))}
+
+
 def image_signals(video: Path, frame_indices: list[int], analysis_width: int = 320) -> dict[int, dict]:
     """Blur, exposure and global motion for the requested frames (single sequential decode)."""
     wanted = set(frame_indices)
@@ -95,17 +111,13 @@ def image_signals(video: Path, frame_indices: list[int], analysis_width: int = 3
                 previous = None
                 continue
             ok, frame = cap.retrieve()
-            h, w = frame.shape[:2]
-            small = cv2.resize(frame, (analysis_width, round(h*analysis_width/w)), interpolation=cv2.INTER_AREA)
-            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            gray, stats = frame_stats(frame, analysis_width)
             if index in wanted:
                 motion = None
                 if previous is not None:
                     (dx, dy), _ = cv2.phaseCorrelate(previous.astype(np.float32), gray.astype(np.float32))
                     motion = float(np.hypot(dx, dy))/analysis_width
-                out[index] = {"blur_laplacian_var": float(cv2.Laplacian(gray, cv2.CV_64F).var()),
-                              "overexposed_fraction": float(np.mean(gray >= 250)),
-                              "underexposed_fraction": float(np.mean(gray <= 15)),
+                out[index] = {**{k: v for k, v in stats.items() if k != "mean_luma"},
                               "camera_shift_width_fraction": motion}
             previous = gray
     finally:

@@ -15,6 +15,7 @@ import numpy as np
 import psutil
 
 from .governance import load as load_governance
+from .quality import frame_stats
 from .model import COORDINATES, MODEL_URL, CropRescueDetector, Detector, MultiViewDetector, sha256
 from .render import RerunSink, VideoSink, composite
 from .tracking import IdentityTracker, baseline_records
@@ -107,7 +108,7 @@ def process(args):
     governance = load_governance(Path(args.governance) if getattr(args, "governance", None) else None,
                                  date.today())
     stages = {k: 0. for k in ["probe", "setup", "decode", "resize_convert", "detect",
-                              "track", "export_rows", "render_video", "rerun_log", "finalize"]}
+                              "track", "frame_stats", "export_rows", "render_video", "rerun_log", "finalize"]}
     mark = time.perf_counter()
     info = probe(source, getattr(args, "timestamp_source", "auto"))
     stages["probe"] = time.perf_counter() - mark
@@ -208,8 +209,17 @@ def process(args):
                          else baseline_records(detections))
                 stages["track"] += time.perf_counter() - mark
                 mark = time.perf_counter()
+                stages["export_rows"] += time.perf_counter() - mark
+                mark = time.perf_counter()
+                _, stats = frame_stats(frame)
+                stages["frame_stats"] += time.perf_counter() - mark
+                mark = time.perf_counter()
                 sample = {"frame_index": frame_index, "timestamp_s": timestamp,
-                          "source_pts_s": pts, "hands": hands}
+                          "source_pts_s": pts,
+                          "quality": {"blur_laplacian_var": stats["blur_laplacian_var"],
+                                      "mean_luma": stats["mean_luma"],
+                                      "masks": {"hand_observed": any(h["observed"] for h in hands)}},
+                          "hands": hands}
                 jf.write(json.dumps(sample, separators=(",", ":"), allow_nan=False)+"\n")
                 observed_frames += int(bool(detections))
                 for hand in hands:
@@ -310,7 +320,8 @@ def process(args):
         }
         (out/"metrics.json").write_text(json.dumps(metrics, indent=2)+"\n")
         manifest = {
-            "schema_version": "0.4", "created_utc": datetime.now(timezone.utc).isoformat(),
+            "schema_version": "0.5",
+            "frame_record_schema": "egohand_twin_frame.schema.json (package egohand_twin/schemas)", "created_utc": datetime.now(timezone.utc).isoformat(),
             "source": {"name": source.name, "sha256": sha256(source),
                        "width": int(info["width"]), "height": int(info["height"]),
                        "fps": info["fps"], "cfr": info["cfr"], "total_frames": len(info["timestamps"]),

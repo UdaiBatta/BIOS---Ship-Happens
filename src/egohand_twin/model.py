@@ -57,7 +57,8 @@ class Detection:
     side: str
     handedness_score: float
     index: int = 0
-    origin: str = "full_frame"
+    origin: str = "full_frame"  # schema enum: full_frame | center_crop_rescue | tile | guided_crop | hand_detector
+    origin_detail: str | None = None  # finer variant, e.g. tile_1 or center_crop_full_resolution
 
     def __post_init__(self):
         self.image = np.asarray(self.image, dtype=np.float64)
@@ -109,7 +110,8 @@ class Detector:
         self.task.close()
 
 
-def map_crop_detection(d: Detection, box, width, height, origin="center_crop_rescue") -> Detection:
+def map_crop_detection(d: Detection, box, width, height, origin="center_crop_rescue",
+                       detail: str | None = None) -> Detection:
     """Restore normalized image coordinates; a crop does not rotate local 3D axes.
 
     ``box`` and ``width``/``height`` must be in the pixel units of the image the
@@ -123,7 +125,7 @@ def map_crop_detection(d: Detection, box, width, height, origin="center_crop_res
     image[:, 0] = (image[:, 0]*(x1-x0)+x0)/width
     image[:, 1] = (image[:, 1]*(y1-y0)+y0)/height
     image[:, 2] *= (x1-x0)/width
-    return Detection(image, d.world.copy(), d.side, d.handedness_score, d.index, origin)
+    return Detection(image, d.world.copy(), d.side, d.handedness_score, d.index, origin, detail)
 
 
 def wrist_distance(a: Detection, b: Detection, width: int, height: int) -> float:
@@ -261,11 +263,12 @@ class MultiViewDetector:
                 xy = entry["detection"].image[:, :2]*[width, height]
                 side = max(hand_scale_px(entry["detection"], width, height)*self.guided_scale,
                            self.guided_min_px)
-                boxes.append(("guided_crop", square_box(*xy.mean(axis=0), side, width, height), entry))
+                boxes.append(("guided_crop", None, square_box(*xy.mean(axis=0), side, width, height), entry))
         if "center" in self.strategies:
-            boxes.append(("center_crop_full", (width//4, height//4, 3*width//4, height), None))
+            boxes.append(("center_crop_rescue", "center_crop_full_resolution",
+                          (width//4, height//4, 3*width//4, height), None))
         if "tiles" in self.strategies:
-            boxes += [(f"tile_{i}", b, None) for i, b in
+            boxes += [("tile", f"tile_{i}", b, None) for i, b in
                       enumerate(tile_boxes(width, height, self.tile_count, self.tile_fraction))]
         return boxes[:self.max_crops]
 
@@ -277,7 +280,7 @@ class MultiViewDetector:
         if len(detections) < self.num_hands and self.strategies:
             boxes = self._boxes(width, height, detections, timestamp_s)
             self.stats["frames_with_crops"] += bool(boxes)
-            for origin, box, entry in boxes:
+            for origin, detail, box, entry in boxes:
                 if len(detections) >= self.num_hands:
                     break
                 x0, y0, x1, y1 = box
@@ -291,7 +294,7 @@ class MultiViewDetector:
                                       interpolation=cv2.INTER_AREA)
                 self.stats["crops"] += 1
                 for candidate in self.secondary.detect(crop, timestamp_s):
-                    candidate = map_crop_detection(candidate, box, width, height, origin)
+                    candidate = map_crop_detection(candidate, box, width, height, origin, detail)
                     if entry is not None and wrist_distance(
                             candidate, entry["detection"], width, height) > self.guided_gate:
                         self.stats["guided_rejected_gate"] += 1
@@ -301,7 +304,7 @@ class MultiViewDetector:
                         continue
                     candidate.index = len(detections)
                     detections.append(candidate)
-                    key = origin.split("_")[0] if origin.startswith("tile") else origin
+                    key = origin
                     self.stats["accepted"][key] = self.stats["accepted"].get(key, 0) + 1
                     if len(detections) >= self.num_hands:
                         break

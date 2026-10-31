@@ -21,12 +21,12 @@ def test_full_resolution_crop_mapping_and_depth_scaling():
     d = hand(.5, .5)
     d.image[:, 2] = -.2
     box = (480, 270, 1290, 1080)  # 810 px square in a 1920x1080 frame
-    mapped = map_crop_detection(d, box, W, H, "tile_1")
+    mapped = map_crop_detection(d, box, W, H, "tile", "tile_1")
     assert mapped.image[0, 0] == pytest.approx((.5*810+480)/W)
     assert mapped.image[0, 1] == pytest.approx((.5*810+270)/H)
     assert mapped.image[0, 2] == pytest.approx(-.2*810/W)
     np.testing.assert_array_equal(mapped.world, d.world)
-    assert mapped.origin == "tile_1"
+    assert mapped.origin == "tile" and mapped.origin_detail == "tile_1"
 
 
 def test_same_hand_from_two_crops_is_duplicate_but_adjacent_hands_are_not():

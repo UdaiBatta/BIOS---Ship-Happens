@@ -15,7 +15,8 @@ import psutil
 
 from .annotate import make_annotation_set, parse_intervals
 from .evaluation import evaluate
-from .identity import write_identity
+from .identity import write_identity, write_identity_jsonl
+from .schema import validate_jsonl
 from .lift import hand_relative_variation, lift_run
 from .compare import compare
 from .governance import retention_report, template as governance_template
@@ -98,6 +99,13 @@ def quality_command(a):
     print(json.dumps(summary, indent=2))
 
 
+def validate_command(a):
+    result = validate_jsonl(Path(a.run)/a.file)
+    print(json.dumps(result, indent=2))
+    if not result["valid"]:
+        sys.exit(2)
+
+
 def governance_init(a):
     out = Path(a.out)
     if out.exists():
@@ -172,7 +180,11 @@ def main():
     p.add_argument("run")
     p.add_argument("--margin", type=float, default=.15)
     p.add_argument("--min-observed", type=int, default=3)
-    p.set_defaults(func=lambda a: print(write_identity(Path(a.run), a.margin, a.min_observed)))
+    p.add_argument("--write-jsonl", action="store_true",
+                   help="Also write landmarks.identity.jsonl with anatomical_side from the vote (assumes wearer hands)")
+    p.set_defaults(func=lambda a: print(write_identity(Path(a.run), a.margin, a.min_observed),
+                                        write_identity_jsonl(Path(a.run), a.margin, a.min_observed)
+                                        if a.write_jsonl else ""))
     p = commands.add_parser("lift", help="EXPERIMENTAL camera-space PnP under an assumed fisheye lens")
     p.add_argument("run")
     p.add_argument("--hfov", type=float, nargs="+", default=[150.],
@@ -211,6 +223,10 @@ def main():
     p.add_argument("run")
     p.add_argument("steps")
     p.set_defaults(func=lambda a: print(json.dumps(load_steps(Path(a.steps), Path(a.run)), indent=2)))
+    p = commands.add_parser("validate", help="Validate a run's per-frame JSONL against egohand_twin_frame.schema.json")
+    p.add_argument("run")
+    p.add_argument("--file", default="landmarks.jsonl", help="JSONL file inside the run (e.g. landmarks.identity.jsonl)")
+    p.set_defaults(func=validate_command)
     p = commands.add_parser("governance-init", help="Write a governance.json template to fill in")
     p.add_argument("--out", required=True)
     p.set_defaults(func=governance_init)

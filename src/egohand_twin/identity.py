@@ -57,3 +57,33 @@ def write_identity(run: Path, margin: float = .15, min_observed: int = 3) -> Pat
     path = run/"identity.json"
     path.write_text(json.dumps(result, indent=2)+"\n")
     return path
+
+
+ANATOMICAL = {"Left": "wearer_left", "Right": "wearer_right", "unknown": "unknown"}
+
+
+def write_identity_jsonl(run: Path, margin: float = .15, min_observed: int = 3) -> Path:
+    """Write RUN/landmarks.identity.jsonl: landmarks.jsonl with anatomical_side from the track vote.
+
+    ASSUMPTION: every detected hand belongs to the camera wearer. The vote cannot
+    detect other people's hands, so ``other`` is never assigned; a background hand
+    would be mislabeled wearer_left/right. On the test clip (provisional labels) the
+    vote was correct for 30/38 matched holdout wearer hands, wrong for 5, unknown for 3.
+    The original landmarks.jsonl is never modified.
+    """
+    out = run/"landmarks.identity.jsonl"
+    if out.exists():
+        raise ValueError("landmarks.identity.jsonl exists; never overwritten")
+    votes = track_votes(run, margin, min_observed)["tracks"]
+    with (run/"landmarks.jsonl").open() as source, out.open("w") as target:
+        for line in source:
+            frame = json.loads(line)
+            for hand in frame["hands"]:
+                vote = votes.get(str(hand["track_id"]), {}).get("side_vote", "unknown")
+                hand["anatomical_side"] = ANATOMICAL[vote]
+                hand["anatomical_side_basis"] = (
+                    f"whole-track vote over observed frames (margin {margin}, min {min_observed}); "
+                    "assumes the hand belongs to the wearer")
+                hand.setdefault("provenance", {})["anatomical_side"] = "inferred"
+            target.write(json.dumps(frame, separators=(",", ":"), allow_nan=False)+"\n")
+    return out

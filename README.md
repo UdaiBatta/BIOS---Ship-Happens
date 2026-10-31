@@ -179,6 +179,30 @@ uv run pytest -q
 
 Detection matching uses raw observed wrists within 0.10 of the image diagonal (configurable). Precision/recall are only meaningful under that matching protocol. PCK@0.03 diagonal is reported on matched hands if joint labels exist; missing detections are reported separately. Sampled ID switches count changes in associated track ID for the same annotated identity between matched samples. Sparse labels miss events and do not give full-sequence ID-switch counts. No 3D error or industrial productivity result is claimed without appropriate ground truth/testing. Detection coverage is **not recall**.
 
+## Per-frame schema (manifest schema 0.5)
+
+Every line of `landmarks.jsonl` validates against the team's `egohand_twin_frame.schema.json` (JSON Schema 2020-12). It ships unchanged in `src/egohand_twin/schemas/`.
+
+```sh
+uv run egohand validate runs/clip_v3                                   # exit 2 and grouped errors if invalid
+uv run egohand identity runs/clip_v3 --write-jsonl                     # adds landmarks.identity.jsonl
+uv run egohand validate runs/clip_v3 --file landmarks.identity.jsonl
+```
+
+New per-hand fields:
+- `anatomical_side`: always `unknown` while processing.
+- `confidence`: always null. No calibrated hand-level confidence exists, and it is never copied from `handedness_score`.
+- `detection_origin`: limited to the schema's values; the exact crop variant goes in `detection_origin_detail`.
+- `provenance`: in the schema's vocabulary, `predicted` means output of a learned model (not the tracker state), and `inferred` means produced by a rule.
+
+New per-frame field: `quality`, with `blur_laplacian_var` and `mean_luma` from a 320 px area-downscaled gray frame, and `masks.hand_observed`. Computing it cost 4.5 s per 900 frames in a measured run.
+
+`identity --write-jsonl` copies the run into a new file with `anatomical_side` set from the whole-track vote. It **assumes every detected hand belongs to the wearer**, so `other` is never assigned; on holdout the vote was right for 30, wrong for 5 and `unknown` for 3 of 38 matched wearer hands. The original JSONL is untouched.
+
+Runs created before schema 0.5 lack `anatomical_side` and fail validation; reprocess them.
+
+Camera-space fields (`cam_xyz_m`, `wrist_pose_cam`, `palm_normal_cam`, `grip_aperture_m`, `quality.reprojection_error_px`) are **not emitted**. The lens is uncalibrated and the experimental lift is kept in separate `lift_*` files.
+
 ## Governance, retention and lens provenance (manifest schema 0.4)
 
 ```sh

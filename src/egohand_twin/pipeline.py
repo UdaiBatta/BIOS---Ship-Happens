@@ -18,6 +18,7 @@ from .governance import load as load_governance
 from .quality import frame_stats
 from .model import COORDINATES, MODEL_URL, CropRescueDetector, Detector, MultiViewDetector, sha256
 from .render import RerunSink, VideoSink, composite
+from .smoothing import smooth_samples
 from .tracking import IdentityTracker, baseline_records
 
 
@@ -93,6 +94,22 @@ def probe(path: Path, timestamp_source: str = "auto", check_frames: int = 48):
     cfr = len(delta) == 0 or bool(np.max(np.abs(delta - 1/fps)) < .001)
     return {**stream, "fps": fps, "cfr": cfr, "timestamps": timestamps,
             "timestamp_source": source, "timestamp_note": note}
+
+
+def _write_csv_rows(writer, sample: dict, hand: dict) -> None:
+    base = {k: sample[k] for k in ["frame_index", "timestamp_s"]}
+    base.update({k: hand[k] for k in ["track_id", "state", "observed", "side", "handedness_score"]})
+    base["missing_reason"] = hand.get("missing_reason")
+    for j in (range(21) if hand["image_xyz"] is not None else [-1]):
+        row = {**base, "landmark_index": j}
+        for key, columns in [
+                ("image_xyz", ["x_norm", "y_norm", "z_norm"]),
+                ("world_xyz_m", ["world_x_m", "world_y_m", "world_z_m"]),
+                ("image_xyz_raw", ["raw_x_norm", "raw_y_norm", "raw_z_norm"]),
+                ("world_xyz_m_raw", ["raw_world_x_m", "raw_world_y_m", "raw_world_z_m"])]:
+            if j >= 0 and hand[key] is not None:
+                row.update(zip(columns, hand[key][j]))
+        writer.writerow(row)
 
 
 def build_detector(args):
@@ -192,6 +209,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             expected = int(np.count_nonzero(in_range)) // max(1, args.stride)
             if args.max_frames is not None:
                 expected = min(expected, args.max_frames)
+            smoothed_hands = 0
+            buffered = []   # frame records, written after offline smoothing (raw values never change)
             while True:
                 # Frames are always decoded sequentially so frame index <-> PTS stays
                 # exact; frames before the interval or skipped by stride are grabbed
@@ -256,7 +275,7 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                                       "mean_luma": stats["mean_luma"],
                                       "masks": {"hand_observed": any(h["observed"] for h in hands)}},
                           "hands": hands}
-                jf.write(json.dumps(sample, separators=(",", ":"), allow_nan=False)+"\n")
+                buffered.append(sample)
                 observed_frames += int(bool(detections))
                 for hand in hands:
                     counts[hand["state"]] += 1
@@ -267,19 +286,6 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                                        "from_state": previous, "to_state": hand["state"],
                                        "missing_reason": hand.get("missing_reason")})
                     previous_states[hand["track_id"]] = hand["state"]
-                    base = {k: sample[k] for k in ["frame_index", "timestamp_s"]}
-                    base.update({k: hand[k] for k in ["track_id", "state", "observed", "side", "handedness_score"]})
-                    base["missing_reason"] = hand.get("missing_reason")
-                    for j in (range(21) if hand["image_xyz"] is not None else [-1]):
-                        row = {**base, "landmark_index": j}
-                        for key, columns in [
-                            ("image_xyz", ["x_norm", "y_norm", "z_norm"]),
-                            ("world_xyz_m", ["world_x_m", "world_y_m", "world_z_m"]),
-                            ("image_xyz_raw", ["raw_x_norm", "raw_y_norm", "raw_z_norm"]),
-                            ("world_xyz_m_raw", ["raw_world_x_m", "raw_world_y_m", "raw_world_z_m"])]:
-                            if j >= 0 and hand[key] is not None:
-                                row.update(zip(columns, hand[key][j]))
-                        writer.writerow(row)
                     sample_rows.append((frame_index, timestamp, hand))
                 stages["export_rows"] += time.perf_counter() - mark
                 mark = time.perf_counter()
@@ -302,6 +308,16 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                 peak_rss = max(peak_rss, rss.memory_info().rss)
                 if processed % 100 == 0:
                     print(f"Processed {processed} frames; source time {timestamp:.2f}s", flush=True)
+            if not args.no_smoothing and args.identity == "persistent":
+                mark = time.perf_counter()
+                smoothed_hands = smooth_samples(buffered, int(info["width"]), int(info["height"]))
+                stages["track"] += time.perf_counter() - mark
+            mark = time.perf_counter()
+            for sample in buffered:
+                jf.write(json.dumps(sample, separators=(",", ":"), allow_nan=False)+"\n")
+                for hand in sample["hands"]:
+                    _write_csv_rows(writer, sample, hand)
+            stages["export_rows"] += time.perf_counter() - mark
         if processed == 0:
             raise ValueError("No frames processed; check input and selected time range")
         finalize_start = time.perf_counter()
@@ -354,6 +370,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             "stage_seconds_unattributed": round(elapsed - sum(stages.values()), 4),
             "timestamp_source": info["timestamp_source"],
             "detector_stats": getattr(detector, "stats", None),
+            "smoothing": ({"method": "offline: wrist constant-velocity Kalman + RTS; fingers One Euro relative to the wrist",
+                           "hands_smoothed": smoothed_hands} if not args.no_smoothing else None),
             "accuracy": None, "identity_switches": None,
             "notes": ["Coverage is not recall or accuracy; labels are required.",
                       "Reacquisitions are tracker decisions, not verified identity recovery.",

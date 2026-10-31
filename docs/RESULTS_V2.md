@@ -169,6 +169,32 @@ Stage breakdown, B0 with the packet probe (seconds): probe 1.1, setup 1.0, decod
 
 Conclusion: keep hand-relative 3D as the reported result. Camera space is an experimental view labeled "assumed lens, depth unvalidated". The calibrated own-recording test from the plan has not been done.
 
+## 7b. Latency and accuracy round 2 (backend work, dev split only)
+
+**Parallel chunked detection** (`--workers N`, recall preset, 30 s, no preview, 4 vCPU, runs one at a time):
+
+| Workers | Processing | Detections vs sequential |
+| ---: | ---: | --- |
+| 1 | 63.2 s | — |
+| 2 | 50.4 s | identical (0/900 frames differ) |
+| 3 | 46.0 s | 12 frames differ by ≤ 0.0015 normalized; one seam did not converge within 60 lookahead frames (reported in `metrics.parallel.seams`) |
+| 4 | 48.9 s | identical |
+
+Without seam repair, 3 workers differed on 72 frames. The backend defaults to 2 workers on hosts with 4 or more CPUs.
+
+**Cheap accuracy variants** on top of the recall preset (dev, provisional labels; reference 36/72 recall, 36/36 precision, 4.0 track IDs per labeled hand):
+
+| Variant | Recall | Precision | Notes | Decision |
+| --- | ---: | ---: | --- | --- |
+| thresholds 0.25 | 36/72 | 36/36 | more frames with detections, no recall gain | rejected |
+| thresholds 0.20 | 36/72 | 36/37 | one false positive | rejected |
+| primary input 1280 px | 28/72 | 28/28 | worse | rejected |
+| retain tracks 1.5 s | 36/72 | 36/36 | fragments 4.0 → 3.25, ID changes 12 → 9, but whole-track side vote 27 → 22 correct (likely wrong joins) | not adopted |
+| + bottom-padded crop (lower half, black padding below the frame, area-downscaled to 480) | 37/72 | 37/37 | truncated hands unchanged (5/10); processing 52 → 74 s | rejected: +1 hand is within noise for +42% time |
+| + bottom-padded crop at full resolution | 33/72 | 33/33 | worse | rejected |
+
+None of these was run on holdout, because none passed on dev. The recall preset stays the default for the backend. The remaining misses (side views, hands gripping objects, hands cut off at the bottom edge) look like limits of MediaPipe's palm detector. The next accuracy levers are a dedicated hand detector (licence-gated; see TODO) and reviewed labels from more recording families.
+
 ## 8. Reproduction
 
 The final demo run (`runs/final_demo`, private) was produced by the same commands with `--preset recall --rrd --governance`. Its 900 frames validate against the frame schema, and its observations are identical to the chosen-configuration runs above (441/441 frames).

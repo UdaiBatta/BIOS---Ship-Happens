@@ -133,3 +133,26 @@ def test_guided_gate_rejects_far_candidates_and_crop_budget():
     assert out == [] or all(o.origin != "guided_crop" for o in out)
     assert d.stats["guided_rejected_gate"] >= 1
     assert len(d.secondary.calls) - before <= 2
+
+
+def test_bottom_padded_crop_maps_back_to_source_pixels():
+    from egohand_twin.model import map_crop_detection
+    box = (W//6, H//2, 5*W//6, H + H//4)   # 1280 x 810 box, 270 px of padding below the frame
+    d = hand(.5, 2/3)                     # wrist at crop pixel (640, 540) == source bottom edge
+    mapped = map_crop_detection(d, box, W, H, "center_crop_rescue", "bottom_padded_crop")
+    assert mapped.image[0, 0] == pytest.approx((W//6 + 640)/W)
+    assert mapped.image[0, 1] == pytest.approx(1.0)
+    assert mapped.origin_detail == "bottom_padded_crop"
+
+
+def test_bottom_strategy_pads_crop_to_box_size():
+    full = np.zeros((H, W, 3), np.uint8)
+    small = np.zeros((540, 960, 3), np.uint8)
+    shapes = []
+
+    def secondary(image, t):
+        shapes.append(image.shape)
+        return []
+    d = make_detector(lambda image, t: [], secondary, strategies=["bottom"])
+    d.detect(small, 0., full)
+    assert shapes == [(H//2 + H//4, 4*W//6, 3)]

@@ -235,13 +235,13 @@ class MultiViewDetector:
     def __init__(self, model_path, strategies=("center",), max_crops=4, dedupe="landmarks",
                  guided_scale=2.5, guided_min_px=320, guided_gap_s=.5, guided_anchor_s=1.,
                  guided_gate=.08, tile_count=3, tile_fraction=.75, crop_max_side=None, **kwargs):
-        unknown = set(strategies) - {"guided", "center", "tiles"}
+        unknown = set(strategies) - {"guided", "center", "tiles", "bottom"}
         if unknown:
             raise ValueError(f"Unknown rescue strategies: {sorted(unknown)}")
         self.primary = Detector(model_path, **kwargs)
         self.secondary = Detector(model_path, **{**kwargs, "mode": "image"})
         self.num_hands = kwargs.get("num_hands", 2)
-        self.strategies = [s for s in ("guided", "center", "tiles") if s in strategies]
+        self.strategies = [s for s in ("guided", "center", "bottom", "tiles") if s in strategies]
         self.max_crops, self.dedupe = max_crops, dedupe
         self.guided_scale, self.guided_min_px = guided_scale, guided_min_px
         self.guided_gap_s, self.guided_anchor_s, self.guided_gate = guided_gap_s, guided_anchor_s, guided_gate
@@ -267,6 +267,11 @@ class MultiViewDetector:
         if "center" in self.strategies:
             boxes.append(("center_crop_rescue", "center_crop_full_resolution",
                           (width//4, height//4, 3*width//4, height), None))
+        if "bottom" in self.strategies:
+            # Lower half plus black padding below the image edge (box extends past the frame),
+            # so hands cut off by the bottom border are no longer at the crop's border.
+            boxes.append(("center_crop_rescue", "bottom_padded_crop",
+                          (width//6, height//2, 5*width//6, height + height//4), None))
         if "tiles" in self.strategies:
             boxes += [("tile", f"tile_{i}", b, None) for i, b in
                       enumerate(tile_boxes(width, height, self.tile_count, self.tile_fraction))]
@@ -286,6 +291,8 @@ class MultiViewDetector:
                 x0, y0, x1, y1 = box
                 crop = np.ascontiguousarray(full[y0:y1, x0:x1, ::-1]) if full_bgr is not None \
                     else np.ascontiguousarray(rgb[y0:y1, x0:x1])
+                if y1 > height:  # pad below the frame with black so the crop matches its box exactly
+                    crop = np.ascontiguousarray(np.pad(crop, ((0, y1 - height), (0, 0), (0, 0))))
                 longest = max(crop.shape[:2])
                 if self.crop_max_side and longest > self.crop_max_side:
                     import cv2

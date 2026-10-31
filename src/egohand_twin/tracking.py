@@ -108,7 +108,7 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
     # Which model produced this observation's 2D points, and where its hand-relative 3D comes from.
     # RTMPose-only hands (hybrid preset) have NO observed 3D: their world_xyz_m_raw is fitted from
     # the 2D points plus a typical hand's depth (handfit), so it is "inferred", never "predicted".
-    fitted = detection is not None and detection.origin_detail == "rtmpose_fitted_3d"
+    fitted = detection is not None and (detection.origin_detail or "").startswith("rtmpose")
     out["landmark_source"] = (("rtmpose" if fitted else "mediapipe") if detection is not None else None)
     out["world_source"] = (("fitted_from_2d" if fitted else "mediapipe_world") if detection is not None else None)
     out["side_source"] = (("inherited_from_track" if detection is not None and abs(detection.handedness_score - .5) < 1e-9

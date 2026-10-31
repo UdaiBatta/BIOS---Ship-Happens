@@ -129,7 +129,8 @@ def build_detector(args):
     if getattr(args, "hand_detector", None):
         from .hybrid import HybridDetector
         detector = HybridDetector(detector, Path(args.model), Path(args.rtm_models), args.detection_threshold,
-                                  args.presence_threshold, num_hands=args.num_hands)
+                                  args.presence_threshold, num_hands=args.num_hands,
+                                  discover_every=getattr(args, "discover_every", None) or 0)
     return detector
 
 

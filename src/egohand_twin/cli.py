@@ -259,6 +259,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Add an RTMDet hand detector for hands MediaPipe misses (part of --preset hybrid; "
                         "needs: egohand fetch-model --rtm)")
     p.add_argument("--rtm-models", default="models/rtm", help="Folder with the RTM hand models")
+    p.add_argument("--discover-every", type=int, default=None,
+                   help="EXPERIMENTAL (hybrid): every N frames look for never-tracked hands; accepted after 3 "
+                        "consecutive confirmations")
     p.add_argument("--bidirectional", action="store_true", default=None,
                    help="Also run detection backwards in time and add hands the forward pass missed "
                         "(offline; about 2x detector time; part of --preset accurate)")

@@ -169,9 +169,12 @@ def _overlap(a, b) -> float:
 
 class HybridDetector:
     """MediaPipe (with its usual rescue) first; RTMDet boxes for missed hands (see module doc)."""
+    discover_every = 0          # class defaults: discovery off unless configured
+    frame_count = 0
     def __init__(self, primary, model_path: Path, rtm_dir: Path, detection: float, presence: float,
                  num_hands: int = 2, pose_threshold: float = .25, fit_3d: bool = True, max_boxes: int = 4,
-                 gate_seconds: float = .8, gate_diagonal: float = .15, crop_retry: bool = False):
+                 gate_seconds: float = .8, gate_diagonal: float = .15, crop_retry: bool = False,
+                 discover_every: int = 0, discover_confirm: int = 3, discover_score: float = .3):
         from .model import Detector
         self.primary = primary
         # MediaPipe retry inside RTMDet boxes. Off by default: on dev it recovered 0 labelled hands and
@@ -191,8 +194,14 @@ class HybridDetector:
         # hands and 11 wrong boxes (mostly skin-coloured rollers); with a gate, 8 real and 1 wrong.
         self.gate_seconds, self.gate_diagonal = gate_seconds, gate_diagonal
         self.recent: list[tuple[float, np.ndarray]] = []           # (time, wrist pixel)
+        # Discovery of hands never tracked before (EXPERIMENTAL, off unless discover_every > 0): every
+        # ``discover_every`` frames, RTMPose reads RTMDet boxes away from known hands; a candidate is
+        # accepted only after it reappears at the same place in ``discover_confirm`` consecutive checks.
+        self.discover_every, self.discover_confirm, self.discover_score = discover_every, discover_confirm, discover_score
+        self.frame_count = 0
+        self.pending: list[dict] = []
         self.stats = {"boxes": 0, "gated_out": 0, "mediapipe_in_box": 0, "rtmpose_fitted": 0,
-                      "rtmpose_rejected": 0}
+                      "rtmpose_rejected": 0, "discovered": 0}
 
     def detect(self, rgb, timestamp_s, full_bgr=None):
         from .model import Detector
@@ -239,8 +248,41 @@ class HybridDetector:
                 found.index = len(detections)
                 detections.append(found)
                 taken.append(_box_of(found, width, height))
+        self.frame_count += 1
+        if self.discover_every and self.frame_count % self.discover_every == 0 and len(detections) < self.num_hands:
+            self._discover(rgb, detections, width, height)
         self.recent += [(timestamp_s, d.image[0, :2].copy()) for d in detections]
         return detections
+
+    def _discover(self, rgb, detections, width, height):
+        taken = [_box_of(d, width, height) for d in detections]
+        known = [d.image[0, :2] for d in detections] + [w for _, w in self.recent]
+        seen = []
+        for box in self.rtm.tiled_boxes(rgb)[:self.max_boxes]:
+            if any(_overlap(box, t) > .4 for t in taken):
+                continue
+            points, scores = self.rtm.keypoints(rgb, box)
+            if float(np.mean(scores)) < self.discover_score:
+                continue
+            wrist = points[0]/[width, height]
+            if any(np.linalg.norm(wrist - k) < .15 for k in known):
+                continue                                   # near a known hand: recovery's job, not discovery's
+            match = next((p for p in self.pending if np.linalg.norm(p["wrist"] - wrist) < .08), None)
+            if match is None:
+                match = {"wrist": wrist, "hits": 0}
+            match["hits"] += 1
+            match["wrist"] = wrist
+            seen.append(match)
+            if match["hits"] >= self.discover_confirm and len(detections) < self.num_hands:
+                found = self._rtmpose(rgb, box, width, height)
+                if found is not None:
+                    found.origin_detail = "rtmpose_discovered"
+                    found.index = len(detections)
+                    detections.append(found)
+                    taken.append(_box_of(found, width, height))
+                    self.stats["discovered"] += 1
+                    seen.remove(match)
+        self.pending = seen                                # unconfirmed candidates must reappear next check
 
     def _mediapipe_in_box(self, rgb, box, width, height):
         from .model import square_box

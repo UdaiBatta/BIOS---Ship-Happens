@@ -124,7 +124,7 @@ def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: 
         raise ValueError(f"lift_{tag} output exists; never overwritten")
     manifest = json.loads((run/"manifest.json").read_text())
     camera = EquidistantFisheye(int(manifest["source"]["width"]), int(manifest["source"]["height"]), hfov_deg)
-    rows, reasons = [], {}
+    rows, reasons, by_source = [], {}, {}
     with (run/"landmarks.jsonl").open() as f:
         for line in f:
             frame = json.loads(line)
@@ -134,6 +134,10 @@ def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: 
                 result = solve_hand(camera, np.asarray(hand["image_xyz_raw"])[:, :2],
                                     hand["world_xyz_m_raw"], max_reproj_px)
                 reasons[result["reason"] or "ok"] = reasons.get(result["reason"] or "ok", 0) + 1
+                source = hand.get("world_source") or "mediapipe_world"
+                entry = by_source.setdefault(source, {"observed": 0, "lifted": 0})
+                entry["observed"] += 1
+                entry["lifted"] += bool(result["ok"])
                 rows.append((frame["frame_index"], frame["timestamp_s"], hand["track_id"], result))
     ok = [r for r in rows if r[3]["ok"]]
     n = len(rows)
@@ -168,6 +172,8 @@ def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: 
         "camera": camera.describe(),
         "declared_capture": manifest.get("capture") or {"status": "not_recorded (pre-0.4 run)"},
         "observed_hands": n, "lifted": len(ok), "rejections": reasons,
+        # fitted_from_2d = RTMPose-only hands whose hand-relative 3D was fitted, not observed
+        "by_world_source": by_source,
         "hand_center_depth_m": q(depth), "wrist_depth_m": q(wrist_depth),
         "fraction_wrist_depth_0p2_0p9m": float(np.mean((wrist_depth >= .2) & (wrist_depth <= .9))) if wrist_depth.size else None,
         "reprojection_rmse_px": q(err),

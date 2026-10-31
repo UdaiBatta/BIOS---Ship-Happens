@@ -170,39 +170,67 @@ def _overlap(a, b) -> float:
 class HybridDetector:
     """MediaPipe (with its usual rescue) first; RTMDet boxes for missed hands (see module doc)."""
     def __init__(self, primary, model_path: Path, rtm_dir: Path, detection: float, presence: float,
-                 num_hands: int = 2, pose_threshold: float = .45, fit_3d: bool = True, max_boxes: int = 4):
+                 num_hands: int = 2, pose_threshold: float = .25, fit_3d: bool = True, max_boxes: int = 4,
+                 gate_seconds: float = .8, gate_diagonal: float = .15, crop_retry: bool = False):
         from .model import Detector
         self.primary = primary
-        self.crop_reader = Detector(model_path, detection, presence, presence, mode="image", num_hands=1)
+        # MediaPipe retry inside RTMDet boxes. Off by default: on dev it recovered 0 labelled hands and
+        # added 4 false ones (rollers at the top edge); MediaPipe's palm detector rejects the same hands
+        # in a crop that it rejects in the full frame. RTMPose does not depend on that palm detector.
+        self.crop_retry = crop_retry
+        self.crop_reader = (Detector(model_path, detection, presence, presence, mode="image", num_hands=1)
+                            if crop_retry else None)
         self.rtm = RtmHand(rtm_dir)
         self.num_hands = num_hands
         self.pose_threshold = pose_threshold
         self.fit_3d = fit_3d
         self.max_boxes = max_boxes
-        self.stats = {"boxes": 0, "mediapipe_in_box": 0, "rtmpose_fitted": 0, "rtmpose_rejected": 0}
+        # Track gate: a recovered hand must lie near a hand this detector returned within the last
+        # ``gate_seconds`` that is not found in the current frame. Chosen on dev frames
+        # (provisional labels): RTMPose score >= 0.25 without the gate accepted 10 real hands and
+        # 11 wrong boxes (mostly skin-coloured rollers); with it, 8 real and 1 wrong.
+        self.gate_seconds, self.gate_diagonal = gate_seconds, gate_diagonal
+        self.recent: list[tuple[float, np.ndarray]] = []           # (time, wrist pixel)
+        self.stats = {"boxes": 0, "gated_out": 0, "mediapipe_in_box": 0, "rtmpose_fitted": 0,
+                      "rtmpose_rejected": 0}
 
     def detect(self, rgb, timestamp_s, full_bgr=None):
         from .model import Detector
         detections = (self.primary.detect(rgb, timestamp_s) if isinstance(self.primary, Detector)
                       else self.primary.detect(rgb, timestamp_s, full_bgr))
-        if len(detections) >= self.num_hands:
-            return detections
         height, width = rgb.shape[:2]
-        taken = [_box_of(d, width, height) for d in detections]
-        for box in self.rtm.tiled_boxes(rgb)[:self.max_boxes]:
-            if len(detections) >= self.num_hands:
-                break
-            if any(_overlap(box, t) > .4 for t in taken):
-                continue
-            self.stats["boxes"] += 1
-            found = self._mediapipe_in_box(rgb, box, width, height)
-            if found is None:
-                found = self._rtmpose(rgb, box, width, height)
-            if found is None:
-                continue
-            found.index = len(detections)
-            detections.append(found)
-            taken.append(_box_of(found, width, height))
+        diagonal = float(np.hypot(width, height))
+        self.recent = [(t, w) for t, w in self.recent if 0 <= timestamp_s - t <= self.gate_seconds]
+        current = [d.image[0, :2]*[width, height] for d in detections]
+        # Hands seen recently but not found now: the only places where recovery is attempted.
+        missing = [w for _, w in self.recent
+                   if all(np.linalg.norm(w - c) > .1*diagonal for c in current)]
+        if len(detections) < self.num_hands and missing:
+            taken = [_box_of(d, width, height) for d in detections]
+            for box in self.rtm.tiled_boxes(rgb)[:self.max_boxes]:
+                if len(detections) >= self.num_hands:
+                    break
+                if any(_overlap(box, t) > .4 for t in taken):
+                    continue
+                centre = np.array([(box[0] + box[2])/2, (box[1] + box[3])/2])
+                reach = self.gate_diagonal*diagonal + .5*np.hypot(box[2] - box[0], box[3] - box[1])
+                if all(np.linalg.norm(centre - w) > reach for w in missing):
+                    self.stats["gated_out"] += 1
+                    continue
+                self.stats["boxes"] += 1
+                found = self._mediapipe_in_box(rgb, box, width, height) if self.crop_retry else None
+                if found is None:
+                    found = self._rtmpose(rgb, box, width, height)
+                if found is None:
+                    continue
+                wrist = found.image[0, :2]*[width, height]
+                if all(np.linalg.norm(wrist - w) > self.gate_diagonal*diagonal for w in missing):
+                    self.stats["gated_out"] += 1
+                    continue
+                found.index = len(detections)
+                detections.append(found)
+                taken.append(_box_of(found, width, height))
+        self.recent += [(timestamp_s, d.image[0, :2]*[width, height]) for d in detections]
         return detections
 
     def _mediapipe_in_box(self, rgb, box, width, height):
@@ -243,4 +271,5 @@ class HybridDetector:
 
     def close(self):
         self.primary.close()
-        self.crop_reader.close()
+        if self.crop_reader is not None:
+            self.crop_reader.close()

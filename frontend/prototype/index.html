@@ -710,7 +710,12 @@ function drawVideo() {
     if (hnd.state === 'reacquired') { g.beginPath(); g.arc(P[0][0], P[0][1], 11, 0, Math.PI * 2); g.lineWidth = 2; g.strokeStyle = COLOR.ink; g.stroke(); }
     g.restore();
     // Label: text in ink, identity carried by the colour key.
-    const lab = `${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side} · ${hnd.state}${hnd.detection_origin ? ' · ' + hnd.detection_origin.replace(/_/g, ' ') : ''}`;
+    const debug = S.debugLabels !== false;   // off = clean labels for presentation (toggle in the backend bar)
+    const src = hnd.detection_origin_detail || hnd.detection_origin;
+    const threeD = hnd.world_source === 'fitted_from_2d' ? ' · 3D fitted from 2D' : (S.lift && HAS_3D.has(hnd.state) && !hnd.cam_xyz_m ? ' · no 3D' : '');
+    const lab = debug
+      ? `#${hnd.track_id} ${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side} · ${hnd.state}${src ? ' · ' + src.replace(/_/g, ' ') : ''}${threeD}`
+      : `${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side}`;
     drawTag(g, placed, P[0][0] - 20, P[0][1] + 22, w, h, lab, col);
   }
 }

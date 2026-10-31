@@ -47,7 +47,7 @@ class Track:
     last_seen: float
     p_right: float
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(2))
-    side: str | None = None          # displayed label; changes only past the hysteresis band
+    side: str | None = None          # Left / Right / unknown; changes only past the hysteresis band
     image_filter: OneEuro = field(default_factory=OneEuro)
     world_filter: OneEuro = field(default_factory=OneEuro)
 
@@ -105,8 +105,16 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
     # Schema provenance vocabulary: "predicted" = output of a learned model (MediaPipe),
     # "inferred" = produced by a rule (filtering, extrapolation, voting), "measured" = direct
     # measurement. Not to be confused with the tracker state "predicted".
+    # Which model produced this observation's 2D points, and where its hand-relative 3D comes from.
+    # RTMPose-only hands (hybrid preset) have NO observed 3D: their world_xyz_m_raw is fitted from
+    # the 2D points plus a typical hand's depth (handfit), so it is "inferred", never "predicted".
+    fitted = detection is not None and detection.origin_detail == "rtmpose_fitted_3d"
+    out["landmark_source"] = (("rtmpose" if fitted else "mediapipe") if detection is not None else None)
+    out["world_source"] = (("fitted_from_2d" if fitted else "mediapipe_world") if detection is not None else None)
+    out["side_source"] = (("inherited_from_track" if detection is not None and abs(detection.handedness_score - .5) < 1e-9
+                           else "tracker_running_vote") if detection is not None else "tracker_running_vote")
     if detection is not None:
-        out["provenance"] = {"image_xyz_raw": "predicted", "world_xyz_m_raw": "predicted",
+        out["provenance"] = {"image_xyz_raw": "predicted", "world_xyz_m_raw": "inferred" if fitted else "predicted",
                              "image_xyz": "inferred", "world_xyz_m": "inferred",
                              "side": "inferred", "handedness_score": "predicted"}
     elif image is not None:
@@ -274,6 +282,12 @@ class IdentityTracker:
         t.p_right = (1 - weight)*t.p_right + weight*right_probability(d)
         if t.side is None:
             t.side = "Right" if t.p_right >= .5 else "Left"
+        elif t.side == "unknown":
+            # undecided until the evidence leaves the hysteresis band (never forced)
+            if t.p_right > .5 + self.side_hysteresis:
+                t.side = "Right"
+            elif t.p_right < .5 - self.side_hysteresis:
+                t.side = "Left"
         elif t.side == "Left" and t.p_right > .5 + self.side_hysteresis:
             t.side = "Right"
         elif t.side == "Right" and t.p_right < .5 - self.side_hysteresis:
@@ -284,7 +298,8 @@ class IdentityTracker:
         # detection path is trusted (a zero-weight path starts the track at 0.5, side undecided).
         scale = min(1., self._side_weight(d)/self.side_weights["default"]) if self.side_weights["default"] else 1.
         t = Track(self.next_id, d, time, .5 + (right_probability(d) - .5)*scale)
-        t.side = "Right" if t.p_right >= .5 else "Left"
+        # No side evidence yet (zero-weight path or a neutral score): shown as "unknown", not guessed.
+        t.side = "unknown" if scale == 0 or t.p_right == .5 else ("Right" if t.p_right > .5 else "Left")
         self.next_id += 1
         return t
 

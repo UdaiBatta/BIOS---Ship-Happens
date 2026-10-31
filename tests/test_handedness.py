@@ -57,4 +57,4 @@ def test_neutral_evidence_inherits_the_track_side():
 
 def test_track_started_by_a_crop_detection_is_undecided_until_evidence():
     out = run([[hand(.3, side="Left", origin="center_crop_rescue")]], **PRESET)
-    assert out[0][0]["side_probability_right_smoothed"] == .5
+    assert out[0][0]["side_probability_right_smoothed"] == .5 and out[0][0]["side"] == "unknown"

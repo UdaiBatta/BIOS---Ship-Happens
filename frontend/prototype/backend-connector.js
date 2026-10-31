@@ -48,6 +48,7 @@
     <label class="note">start <input id="bkStart" type="number" value="0" min="0" step="1" style="width: 4.5em"> s</label>
     <label class="note">length <input id="bkDur" type="number" value="30" min="1" step="1" style="width: 4.5em"> s</label>
     <button class="btn" id="bkProcess" title="Queue a processing run on the local worker">Process</button>
+    <label class="note" title="Track number, detection path and 3D source on each hand; turn off for presentation"><input type="checkbox" id="bkDebug" checked> debug labels</label>
     <span class="time" id="bkStatus">connecting…</span>`;
   const toolbar = document.querySelector('.controls');
   toolbar.after(bar);
@@ -190,6 +191,7 @@
   }));
   document.getElementById('bkRefresh').addEventListener('click', guard(() => refresh()));
   document.getElementById('bkProcess').addEventListener('click', guard(processVideo));
+  document.getElementById('bkDebug').addEventListener('change', (e) => { S.debugLabels = e.target.checked; S.dirty = true; });
   // Loading a local video file must not keep the backend proxy's offset.
   document.getElementById('fileVideo').addEventListener('change', () => { S.videoOffset = 0; });
 

@@ -126,3 +126,24 @@ def test_incomplete_frame_rejected(tmp_path):
     labels = _labels(tmp_path, [{"frame_index": 0, "split": "dev", "complete": False, "hands": []}])
     with pytest.raises(ValueError, match="not marked complete"):
         evaluate(tmp_path, labels, allow_provisional=True)
+
+
+def test_offline_track_vote_reported_and_unknown_not_forced(tmp_path):
+    from egohand_twin.identity import write_identity
+    frames = []
+    for i in range(6):
+        # Track 1: mostly Left with one flipped frame; track 2: ambiguous.
+        left = {**_hand(1, .2, .5, "Right" if i == 2 else "Left"), "handedness_score": .9}
+        ambiguous = {**_hand(2, .8, .5, "Right" if i % 2 else "Left"), "handedness_score": .55}
+        frames.append({"frame_index": i, "timestamp_s": i/30, "hands": [left, ambiguous]})
+    _v2_run(tmp_path, frames)
+    write_identity(tmp_path)
+    votes = json.loads((tmp_path/"identity.json").read_text())["tracks"]
+    assert votes["1"]["side_vote"] == "Left" and votes["2"]["side_vote"] == "unknown"
+    labels = _labels(tmp_path, [{"frame_index": 2, "split": "dev", "interval": "a", "hands": [
+        {"gt_id": "a:L", "side": "wearer_left", "wrist_xy": [.2, .5], "visibility": "full"},
+        {"gt_id": "a:R", "side": "wearer_right", "wrist_xy": [.8, .5], "visibility": "full"}]}])
+    r = evaluate(tmp_path, labels, allow_provisional=True)
+    assert r["side_accuracy_raw_per_frame"]["all"]["accuracy_as_labeled"]["k"] == 0  # frame 2: L flipped to Right, R reported Left
+    vote = r["side_accuracy_offline_track_vote"]["all"]
+    assert vote["accuracy_as_labeled"]["k"] == 1 and vote["confusion"]["wearer_right->unknown"] == 1

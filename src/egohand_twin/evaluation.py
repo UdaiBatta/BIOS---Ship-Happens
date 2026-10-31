@@ -111,6 +111,9 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
         if not annotations["frames"]:
             raise ValueError(f"No labeled frames in split {split!r}")
     predictions = load_predictions(run)
+    votes = None
+    if (run/"identity.json").exists():
+        votes = json.loads((run/"identity.json").read_text())["tracks"]
     w, h = manifest["source"]["width"], manifest["source"]["height"]
     scale = np.array([w, h])/np.hypot(w, h)
     tp = fp = fn = switches = points_correct = points_total = 0
@@ -123,6 +126,7 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
     false_positive_frames, missed = [], []
     side_raw = defaultdict(int)
     side_track = defaultdict(int)
+    side_vote = defaultdict(int)
     origin_counts = defaultdict(lambda: [0, 0])
     audit = {t: [0, 0] for t in audit_thresholds}
     frames_with_gt = frames_with_gt_and_pred = 0
@@ -178,6 +182,8 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
             if expected:
                 side_raw[(split, g["side"], p.get("raw_side"))] += 1
                 side_track[(split, g["side"], p.get("side"))] += 1
+                if votes is not None:
+                    side_vote[(split, g["side"], votes.get(str(p["track_id"]), {}).get("side_vote", "unknown"))] += 1
             key = (frame["interval"], g["gt_id"])
             if key in previous_ids:
                 id_pairs += 1
@@ -239,6 +245,7 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
                             for t, v in audit.items()},
         "side_accuracy_raw_per_frame": side_summary(side_raw),
         "side_accuracy_track_smoothed": side_summary(side_track),
+        "side_accuracy_offline_track_vote": side_summary(side_vote) if votes is not None else None,
         "detections_by_origin": {k: {"matched": v[0], "unmatched": v[1]} for k, v in sorted(origin_counts.items())},
         "sampled_identity_switches": switches,
         "sampled_identity_pairs": id_pairs,

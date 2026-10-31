@@ -14,6 +14,7 @@ import psutil
 
 from .annotate import make_annotation_set, parse_intervals
 from .evaluation import evaluate
+from .identity import write_identity
 from .model import fetch_model, sha256
 from .pipeline import probe, process
 from .render import fit_image, text, rebuild_replay
@@ -98,7 +99,13 @@ def main():
     p.add_argument("--num-hands", type=int, default=2)
     p.add_argument("--identity", choices=["persistent", "baseline"], default="persistent")
     p.add_argument("--detector-mode", choices=["video", "image"], default="video")
-    p.add_argument("--rescue-crop", action="store_true", help="Experimental center-crop rescue; evaluate false positives separately")
+    p.add_argument("--rescue-crop", action="store_true", help="Historical center-crop rescue on the downscaled frame (wrist dedupe)")
+    p.add_argument("--rescue", help="Experimental full-resolution crop strategies, comma-separated: guided,center,tiles")
+    p.add_argument("--max-crops", type=int, default=4, help="Maximum crop proposals evaluated per frame")
+    p.add_argument("--dedupe", choices=["landmarks", "wrist"], default="landmarks",
+                   help="Duplicate rule for --rescue candidates")
+    p.add_argument("--timestamp-source", choices=["auto", "frames"], default="auto",
+                   help="auto: verified packet PTS (fast); frames: decode every frame with FFprobe")
     p.add_argument("--no-smoothing", action="store_true")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
@@ -123,6 +130,11 @@ def main():
     p.add_argument("--summary", action="store_true", help="Omit per-frame miss/false-positive lists")
     p.add_argument("--split", help="Only score frames from this label split (e.g. dev or holdout)")
     p.set_defaults(func=evaluate_command)
+    p = commands.add_parser("identity", help="Offline whole-track left/right vote -> RUN/identity.json")
+    p.add_argument("run")
+    p.add_argument("--margin", type=float, default=.15)
+    p.add_argument("--min-observed", type=int, default=3)
+    p.set_defaults(func=lambda a: print(write_identity(Path(a.run), a.margin, a.min_observed)))
     p = commands.add_parser("sample-labels", help="Create private annotation frames and an unlabeled template")
     p.add_argument("video")
     p.add_argument("--out", required=True)
@@ -140,7 +152,7 @@ def main():
         Path(a.video), Path(a.out), probe(Path(a.video))["timestamps"],
         parse_intervals(a.intervals), a.step_frames, a.split)["frames"]), "frames"))
     args = parser.parse_args()
-    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "wrist_threshold", "pck_threshold"]:
+    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "max_crops", "wrist_threshold", "pck_threshold"]:
         if hasattr(args, name) and getattr(args, name) is not None and getattr(args, name) <= 0:
             parser.error(f"{name.replace('_', '-')} must be positive")
     if getattr(args, "start_seconds", 0) < 0:

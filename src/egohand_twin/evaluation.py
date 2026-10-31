@@ -102,6 +102,48 @@ class _Counter:
                 "recall": _rate(self.tp, self.tp+self.fn)}
 
 
+def continuity(samples) -> dict:
+    """Run-level continuity from (timestamp_s, hand_record) pairs in time order. No labels needed.
+
+    - predicted runs: consecutive ``predicted`` samples of a track (2D-only, capped at
+      ~0.15 s by the tracker; reported as a check of that rule).
+    - bridged gaps: unobserved time between two observed samples of the same track
+      (the track was reacquired), i.e. last observed -> next observed timestamp.
+    - terminal gaps: tracks whose last state is not observed (ended lost/retired).
+    Seconds use source presentation time. These are tracker statistics, not accuracy.
+    """
+    tracks: dict[int, list] = {}
+    for t, hand in samples:
+        tracks.setdefault(hand["track_id"], []).append((t, hand["state"], hand["observed"]))
+    predicted_runs, bridged, observed_counts = [], [], []
+    terminal = 0
+    for rows in tracks.values():
+        run_start = last_obs = None
+        observed_counts.append(sum(o for _, _, o in rows))
+        for i, (t, state, observed) in enumerate(rows):
+            if state == "predicted":
+                run_start = t if run_start is None else run_start
+                nxt = rows[i+1][0] if i+1 < len(rows) else t
+                if i+1 == len(rows) or rows[i+1][1] != "predicted":
+                    predicted_runs.append(nxt - run_start if i+1 < len(rows) else t - run_start)
+                    run_start = None
+            if observed:
+                if last_obs is not None and t - last_obs[0] > 0 and last_obs[1] != i - 1:
+                    bridged.append(t - last_obs[0])
+                last_obs = (t, i)
+        if rows and not rows[-1][2]:
+            terminal += 1
+
+    def stats(values):
+        return ({"n": len(values), "median_s": float(np.median(values)), "max_s": float(np.max(values))}
+                if values else {"n": 0})
+    return {"tracks": len(tracks), "observed_samples_per_track_median":
+            float(np.median(observed_counts)) if observed_counts else None,
+            "predicted_runs": stats(predicted_runs), "bridged_gaps": stats(bridged),
+            "tracks_ending_unobserved": terminal,
+            "note": "Tracker statistics from the run itself; not compared with labels."}
+
+
 def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
              allow_provisional=False, audit_thresholds=(.05, .10), split=None, conditions=None):
     if not (run/"COMPLETE").exists():
@@ -135,6 +177,7 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
     origin_counts = defaultdict(lambda: [0, 0])
     audit = {t: [0, 0] for t in audit_thresholds}
     frames_with_gt = frames_with_gt_and_pred = 0
+    id_history: list = []
     # Last observed wrist per track (scanning every processed frame in order), used to
     # check missing_reason claims against labeled hands that were not detected.
     last_wrist: dict[int, dict[int, np.ndarray]] = {}
@@ -221,6 +264,7 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
                 if votes is not None:
                     side_vote[(split, g["side"], votes.get(str(p["track_id"]), {}).get("side_vote", "unknown"))] += 1
             key = (frame["interval"], g["gt_id"])
+            id_history.append((key, p["track_id"]))
             if key in previous_ids:
                 id_pairs += 1
                 if previous_ids[key] != p["track_id"]:
@@ -241,6 +285,13 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
                     points_total += 1
                     points_correct += distance <= pck_threshold
     switches = id_changes
+    fragments: dict[tuple, set] = {}
+    for key, tid in id_history:
+        fragments.setdefault(key, set()).add(tid)
+    complete = all("timestamp_s" in f and all("state" in h for h in f["hands"]) for f in predictions.values())
+    run_continuity = (continuity((predictions[i]["timestamp_s"], h) for i in sorted(predictions)
+                                 for h in predictions[i]["hands"])
+                      if complete else {"unavailable": "run records lack timestamp_s/state"})
 
     def side_summary(table):
         out = {}
@@ -292,6 +343,14 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
             "unknown": {"records": reason_check["unknown"][0],
                         "with_nearby_undetected_hand": reason_check["unknown"][1]},
             "note": "Only non-observed track records in labeled frames; runs without missing_reason report zeros."},
+        "fragments": {
+            "labeled_identities_with_matches": len(fragments),
+            "track_ids_per_identity": {f"{k[0]}:{k[1]}" if not str(k[1]).startswith(str(k[0])) else str(k[1]):
+                                       len(v) for k, v in sorted(fragments.items(), key=lambda x: str(x[0]))},
+            "mean_track_ids_per_identity": (float(np.mean([len(v) for v in fragments.values()]))
+                                            if fragments else None),
+            "note": "Distinct track IDs matched to one labeled hand within one labeled interval (1 = no fragmentation)."},
+        "run_continuity": run_continuity,
         "sampled_identity_switches": switches,
         "sampled_identity_pairs": id_pairs,
         "pck_on_matched_hands": points_correct/points_total if points_total else None,

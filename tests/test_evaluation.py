@@ -164,3 +164,27 @@ def test_missing_reason_claims_checked_against_undetected_labeled_hands(tmp_path
     # The "out_of_view" track's hand is still visible (labeled) near its last wrist: contradicted.
     assert check["out_of_view"] == {"claims": 1, "contradicted_by_nearby_undetected_hand": 1}
     assert check["unknown"] == {"records": 1, "with_nearby_undetected_hand": 0}
+
+
+def test_continuity_bridged_terminal_and_predicted_runs():
+    from egohand_twin.evaluation import continuity
+
+    def h(tid, state):
+        return {"track_id": tid, "state": state, "observed": state in ("observed", "reacquired")}
+    samples = [(0., h(1, "observed")), (.1, h(1, "predicted")), (.2, h(1, "lost")),
+               (.5, h(1, "reacquired")), (.6, h(1, "observed")),
+               (0., h(2, "observed")), (.1, h(2, "predicted")), (.2, h(2, "predicted")), (.3, h(2, "lost"))]
+    c = continuity(samples)
+    assert c["tracks"] == 2 and c["tracks_ending_unobserved"] == 1
+    assert c["bridged_gaps"]["n"] == 1 and c["bridged_gaps"]["max_s"] == pytest.approx(.5)
+    assert c["predicted_runs"]["n"] == 2 and c["predicted_runs"]["max_s"] == pytest.approx(.2)
+
+
+def test_fragments_count_track_ids_per_labeled_hand(tmp_path):
+    _v2_run(tmp_path, [{"frame_index": i, "timestamp_s": i/30, "hands": [
+        {**_hand(1 if i < 2 else 2, .2, .5), "state": "observed"}]} for i in range(4)])
+    labels = _labels(tmp_path, [{"frame_index": i, "split": "dev", "interval": "a", "hands": [
+        {"gt_id": "a:L", "side": "wearer_left", "wrist_xy": [.2, .5], "visibility": "full"}]} for i in range(4)])
+    r = evaluate(tmp_path, labels, allow_provisional=True)
+    assert r["fragments"]["track_ids_per_identity"] == {"a:L": 2}
+    assert r["run_continuity"]["tracks"] == 2

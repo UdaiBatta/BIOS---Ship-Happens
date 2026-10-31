@@ -6,7 +6,7 @@ set -euo pipefail
 MAX_BYTES=$((2 * 1024 * 1024))
 MEDIA_RE='\.(mp4|mov|avi|mkv|webm|m4v|mpg|mpeg|jpg|jpeg|png|gif|bmp|tif|tiff|webp)$'
 DATA_RE='\.(npy|npz|pkl|pickle|jsonl|parquet|h5|hdf5|task|pth|pt|ckpt|onnx|tflite|safetensors)$'
-DIR_RE='(^|/)(data|outputs|frames|labels|hackathon_data)/'
+DIR_RE='(^|/)(data|media|outputs|frames|labels|hackathon_data)/'
 
 fail=0
 while IFS= read -r -d '' f; do

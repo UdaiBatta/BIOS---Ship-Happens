@@ -20,7 +20,7 @@ uv run egohand fetch-model >/dev/null
 uv run rerun analytics disable >/dev/null 2>&1 || true
 uv run egohand doctor | grep -E '"mediapipe_runtime"' || true
 
-if [ ! -f "$CLIP" ]; then
+if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.webm" \) 2>/dev/null | grep -q .; then
   echo "==> $CLIP not found; downloading it from the private release (needs: gh auth login)"
   need gh "Install GitHub CLI (macOS: brew install gh) and run: gh auth login"
   TMP="$(mktemp -d)"
@@ -33,7 +33,10 @@ fi
 echo "==> Preparing the backend database"
 cd backend
 uv run python manage.py migrate -v0
-uv run python manage.py egohand_register "$ROOT/$CLIP"
+TO_REGISTER=()
+[ -f "$ROOT/$CLIP" ] && TO_REGISTER+=("$ROOT/$CLIP")
+[ -d "$ROOT/media" ] && TO_REGISTER+=("$ROOT/media")
+uv run python manage.py egohand_register "${TO_REGISTER[@]}"
 
 echo "==> Starting worker and server (Ctrl+C stops both)"
 uv run python manage.py egohand_worker --recover &

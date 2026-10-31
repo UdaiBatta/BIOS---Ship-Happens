@@ -28,6 +28,17 @@ Measured on one clip (one of four recording families) with **provisional labels*
 
 ## Quick start
 
+**One command (viewer + backend + worker):** put your videos in `media/` at the repo root (git-ignored, never committed), then run
+
+```sh
+bash scripts/run_local.sh                                          # macOS / Linux
+powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1     # Windows (add -Test to run all tests first)
+```
+
+It installs dependencies, registers every video in `media/` (and the handoff clip in `data/private/` if present), starts the worker and opens http://127.0.0.1:8000/. Pick a video on the **Backend** row and click **Process**.
+
+### Manual setup
+
 Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, a laptop CPU.
 - **Linux:** MediaPipe also needs `libgles2 libegl1`.
 - **macOS:** `brew install ffmpeg`.

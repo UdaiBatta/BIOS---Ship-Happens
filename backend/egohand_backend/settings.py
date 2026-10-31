@@ -41,8 +41,10 @@ DATA_DIR = Path(os.environ.get("EGOHAND_DATA_DIR", REPO_DIR/"data"/"private"/"ba
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RUNS_DIR = Path(os.environ.get("EGOHAND_RUNS_DIR", REPO_DIR/"runs"/"backend"))
 MODEL_PATH = Path(os.environ.get("EGOHAND_MODEL", REPO_DIR/"models"/"hand_landmarker.task"))
+# Default allowed video folders: data/private/ and media/ in the repo (both git-ignored).
 MEDIA_ROOTS = [Path(p).resolve() for p in os.environ.get(
-    "EGOHAND_MEDIA_ROOTS", str(REPO_DIR/"data"/"private")).split(os.pathsep) if p]
+    "EGOHAND_MEDIA_ROOTS", os.pathsep.join([str(REPO_DIR/"data"/"private"), str(REPO_DIR/"media")])
+).split(os.pathsep) if p]
 UPLOAD_DIR = Path(os.environ.get("EGOHAND_UPLOAD_DIR", REPO_DIR/"data"/"private"/"uploads"))
 API_TOKEN = os.environ.get("EGOHAND_API_TOKEN", "")
 CORS_ALLOWED_ORIGINS = [o for o in os.environ.get(

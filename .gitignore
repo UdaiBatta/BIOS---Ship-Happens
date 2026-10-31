@@ -39,6 +39,7 @@
 *.bin
 # Data folders
 data/
+media/
 outputs/
 frames/
 labels/

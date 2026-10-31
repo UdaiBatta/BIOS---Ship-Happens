@@ -29,7 +29,8 @@ Run 'Fetching the hand model' { uv run egohand fetch-model | Out-Null }
 uv run rerun analytics disable | Out-Null
 Run 'Checking the MediaPipe runtime' { uv run egohand doctor | Select-String 'mediapipe_runtime' }
 
-if (-not (Test-Path $Clip)) {
+$HasMedia = (Test-Path (Join-Path $Root 'media')) -and (Get-ChildItem (Join-Path $Root 'media') -Recurse -File -Include *.mp4,*.mov,*.mkv,*.avi,*.m4v,*.webm | Select-Object -First 1)
+if (-not (Test-Path $Clip) -and -not $HasMedia) {
     Write-Host "==> $Clip not found; downloading it from the private release (needs: gh auth login)" -ForegroundColor Cyan
     Need gh "Install GitHub CLI (winget install --id=GitHub.cli -e) and run: gh auth login. Or download ps4-source-video.zip from https://github.com/$Repo/releases/tag/$Release and unzip it here."
     $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("egohand-" + [guid]::NewGuid())
@@ -53,7 +54,11 @@ if ($Test) {
 
 Set-Location (Join-Path $Root 'backend')
 Run 'Preparing the backend database' { uv run python manage.py migrate -v0 }
-Run 'Registering the clip' { uv run python manage.py egohand_register $Clip }
+$Media = Join-Path $Root 'media'
+$ToRegister = @()
+if (Test-Path $Clip) { $ToRegister += $Clip }
+if (Test-Path $Media) { $ToRegister += $Media }
+Run 'Registering the clip and every video in media\' { uv run python manage.py egohand_register @ToRegister }
 
 Write-Host '==> Starting the worker in a second window (close that window to stop it)' -ForegroundColor Cyan
 $Backend = (Get-Location).Path
@@ -61,6 +66,6 @@ Start-Process powershell -ArgumentList '-NoExit', '-Command', "Set-Location '$Ba
 if (-not $NoBrowser) {
     Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command', 'Start-Sleep 5; Start-Process http://127.0.0.1:8000/'
 }
-Write-Host '    Open http://127.0.0.1:8000/  ->  Backend row: pick the video, preset recall, start 0, length 30, Process'
+Write-Host '    Open http://127.0.0.1:8000/  ->  Backend row: pick a video, preset recall, start 0, length 30, Process'
 Write-Host '    Ctrl+C here stops the server.'
 uv run python manage.py runserver 127.0.0.1:8000 --noreload

@@ -9,6 +9,7 @@ uv sync --extra dev --extra viewer --extra backend
 uv run egohand fetch-model
 cd backend
 uv run python manage.py migrate
+uv run python manage.py egohand_register ../media             # every video in a folder (or list files)
 uv run python manage.py runserver 127.0.0.1:8000           # API
 uv run python manage.py egohand_worker --recover           # job worker (second terminal)
 ```
@@ -21,7 +22,7 @@ Environment variables (all optional):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `EGOHAND_MEDIA_ROOTS` | `<repo>/data/private` | Folders from which videos may be registered and served, separated by `;` on Windows or `:` on Unix |
+| `EGOHAND_MEDIA_ROOTS` | `<repo>/data/private` and `<repo>/media` | Folders from which videos may be registered and served, separated by `;` on Windows or `:` on Unix |
 | `EGOHAND_UPLOAD_DIR` | `<repo>/data/private/uploads` | Dedicated trusted upload folder; uploads work even when media roots point elsewhere |
 | `EGOHAND_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Frontend dev origins allowed by CORS |
 | `EGOHAND_API_TOKEN` | empty (no auth) | If set, send `Authorization: Bearer <token>`. For `<video src>` and `<img src>`, append `?token=<token>`. `/api/health` stays open. |

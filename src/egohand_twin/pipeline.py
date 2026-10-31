@@ -149,7 +149,10 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
     tracker = IdentityTracker(args.predict_seconds, args.retain_seconds, not args.no_smoothing,
                               (int(info["width"]), int(info["height"]))
                               if getattr(args, "tracker_units", "normalized") == "diagonal" else None,
-                              box_link=bool(getattr(args, "box_link", False)))
+                              box_link=bool(getattr(args, "box_link", False)),
+                              side_weights=({"center_crop_rescue": args.crop_side_weight}
+                                            if getattr(args, "crop_side_weight", None) is not None else None),
+                              side_hysteresis=getattr(args, "side_hysteresis", None) or 0.)
     rss = psutil.Process()
     peak_rss = rss.memory_info().rss
     latency, sample_rows, events = [], [], []

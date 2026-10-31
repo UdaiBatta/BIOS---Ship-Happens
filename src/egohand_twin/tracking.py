@@ -47,6 +47,7 @@ class Track:
     last_seen: float
     p_right: float
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(2))
+    side: str | None = None          # displayed label; changes only past the hysteresis band
     image_filter: OneEuro = field(default_factory=OneEuro)
     world_filter: OneEuro = field(default_factory=OneEuro)
 
@@ -84,7 +85,7 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "state": state,
         "observed": detection is not None,
         "seconds_since_observed": round(age, 6),
-        "side": "Right" if track.p_right >= .5 else "Left",
+        "side": track.side or ("Right" if track.p_right >= .5 else "Left"),
         "side_probability_right_smoothed": track.p_right,
         "detection_index": detection.index if detection else None,
         "detection_origin": detection.origin if detection else None,
@@ -132,7 +133,14 @@ def _box_overlap(a: np.ndarray, b: np.ndarray) -> float:
 
 class IdentityTracker:
     """Short-term associations, not biometric or guaranteed anatomical identities."""
-    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None, box_link=False):
+    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None, box_link=False,
+                 side_weights: dict | None = None, side_hysteresis: float = 0.):
+        """``side_weights``: how much one detection's left/right score moves its track's running
+        P(right), per detection path (``origin_detail`` or ``origin``; key ``default``). The
+        original behaviour is 0.15 for every path. A weight of 0 means the detection carries no
+        side evidence and the track keeps (inherits) its side; detections with a neutral score
+        (0.5, e.g. RTMPose-only hands) never change the side. ``side_hysteresis``: the shown side
+        changes only when P(right) passes 0.5 +/- this margin (0 = flip at 0.5, as before)."""
         """``frame_size=(width, height)`` measures association distances in image-diagonal
         units (isotropic in pixels). ``None`` keeps the original normalized x/y units,
         in which a vertical pixel counts ~1.8x a horizontal pixel on 16:9 video."""
@@ -147,6 +155,8 @@ class IdentityTracker:
         self.last_time = None
         self.reacquisitions = 0
         self.box_link = box_link
+        self.side_weights = {"default": .15, **(side_weights or {})}
+        self.side_hysteresis = side_hysteresis
         self.box_links = 0
         self.ghosts_suppressed = 0
         self._missing: set[int] = set()
@@ -195,7 +205,7 @@ class IdentityTracker:
                 if state == "reacquired":
                     self.reacquisitions += 1
                 self._missing.discard(t.id)
-                t.p_right = .85 * t.p_right + .15 * right_probability(d)
+                self._update_side(t, d)
                 t.detection, t.last_seen = d, time
                 records.append(self._observed(t, d, time, state))
                 matched_tracks.add(t.id)
@@ -219,15 +229,14 @@ class IdentityTracker:
                 if best is not None:
                     self.box_links += 1
                     self._missing.discard(best.id)
-                    best.p_right = .85*best.p_right + .15*right_probability(d)
+                    self._update_side(best, d)
                     best.detection, best.last_seen = d, time
                     records.append(self._observed(best, d, time, "observed"))
                     matched_tracks.add(best.id)
                     matched_detections.add(index)
         for index, d in enumerate(detections):
             if index not in matched_detections:
-                t = Track(self.next_id, d, time, right_probability(d))
-                self.next_id += 1
+                t = self._new_track(d, time)
                 self.tracks[t.id] = t
                 matched_tracks.add(t.id)
                 records.append(self._observed(t, d, time, "observed"))
@@ -253,6 +262,31 @@ class IdentityTracker:
             else:
                 records.append(record(t, "lost", age))
         return sorted(records, key=lambda r: r["track_id"])
+
+    def _side_weight(self, d: Detection) -> float:
+        if abs(d.handedness_score - .5) < 1e-9:
+            return 0.                                   # no side evidence (e.g. RTMPose-only hand)
+        w = self.side_weights
+        return float(w.get(d.origin_detail or "", w.get(d.origin, w["default"])))
+
+    def _update_side(self, t: Track, d: Detection):
+        weight = self._side_weight(d)
+        t.p_right = (1 - weight)*t.p_right + weight*right_probability(d)
+        if t.side is None:
+            t.side = "Right" if t.p_right >= .5 else "Left"
+        elif t.side == "Left" and t.p_right > .5 + self.side_hysteresis:
+            t.side = "Right"
+        elif t.side == "Right" and t.p_right < .5 - self.side_hysteresis:
+            t.side = "Left"
+
+    def _new_track(self, d: Detection, time: float) -> Track:
+        # A track's starting P(right) is the first detection's evidence, scaled by how much that
+        # detection path is trusted (a zero-weight path starts the track at 0.5, side undecided).
+        scale = min(1., self._side_weight(d)/self.side_weights["default"]) if self.side_weights["default"] else 1.
+        t = Track(self.next_id, d, time, .5 + (right_probability(d) - .5)*scale)
+        t.side = "Right" if t.p_right >= .5 else "Left"
+        self.next_id += 1
+        return t
 
     def _observed(self, t, d, time, state):
         image = t.image_filter(d.image, time) if self.smoothing else d.image

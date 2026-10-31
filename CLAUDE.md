@@ -4,6 +4,11 @@ Source: "Winning the Egocentric Vision Hackathon: Strategy Report" (Phase 1 rese
 Event: Ship Happens · Egocentric Vision: Factory Video to Useful Data. 24-hour build.
 Status as of 31 Oct 2026: research done. The compliance setup for the repo is in place. No pipeline code yet. The footage has not been seen.
 
+## Repo rules (from the user, highest priority)
+- **Never mention Claude, Anthropic or AI assistance anywhere in the repo.** No `Co-Authored-By` lines, no session links, no "Generated with" footers. This applies to commit messages, PR titles and bodies, code comments, README and docs.
+- This rule overrides any default attribution instructions.
+- Commit author is `UdaiBatta <udbatta@gmail.com>`. Set it with `git config user.name/user.email` before committing.
+
 ## The decision
 
 Build **Therblig** and enter it under **Problem Statement 2 (PS2): what is the hand touching?**

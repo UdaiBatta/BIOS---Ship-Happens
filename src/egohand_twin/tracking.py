@@ -121,9 +121,18 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
     return out
 
 
+def _box_overlap(a: np.ndarray, b: np.ndarray) -> float:
+    """Intersection of two landmark boxes over the smaller box (normalized image coordinates)."""
+    (ax0, ay0), (ax1, ay1) = a.min(0), a.max(0)
+    (bx0, by0), (bx1, by1) = b.min(0), b.max(0)
+    ix, iy = max(0., min(ax1, bx1) - max(ax0, bx0)), max(0., min(ay1, by1) - max(ay0, by0))
+    smaller = min((ax1 - ax0)*(ay1 - ay0), (bx1 - bx0)*(by1 - by0))
+    return float(ix*iy/smaller) if smaller > 0 else 0.
+
+
 class IdentityTracker:
     """Short-term associations, not biometric or guaranteed anatomical identities."""
-    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None):
+    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None, box_link=False):
         """``frame_size=(width, height)`` measures association distances in image-diagonal
         units (isotropic in pixels). ``None`` keeps the original normalized x/y units,
         in which a vertical pixel counts ~1.8x a horizontal pixel on 16:9 video."""
@@ -137,6 +146,9 @@ class IdentityTracker:
         self.next_id = 1
         self.last_time = None
         self.reacquisitions = 0
+        self.box_link = box_link
+        self.box_links = 0
+        self.ghosts_suppressed = 0
         self._missing: set[int] = set()
 
     def _cost(self, t: Track, d: Detection, time):
@@ -188,6 +200,30 @@ class IdentityTracker:
                 records.append(self._observed(t, d, time, state))
                 matched_tracks.add(t.id)
                 matched_detections.add(int(col))
+        # Second pass: a detection whose hand box mostly covers a just-missed track's predicted box is
+        # the same hand (e.g. a rescue crop placed the wrist differently, failing the wrist gate).
+        # Linking them keeps one identity and avoids drawing a "predicted" ghost over an observed hand.
+        if self.box_link:
+            for index, d in enumerate(detections):
+                if index in matched_detections:
+                    continue
+                best, best_overlap = None, .5
+                for t in active:
+                    age = time - t.last_seen
+                    if t.id in matched_tracks or age > self.predict_s:
+                        continue
+                    shifted = t.detection.image[:, :2] + t.velocity*age
+                    overlap = _box_overlap(shifted, d.image[:, :2])
+                    if overlap > best_overlap:
+                        best, best_overlap = t, overlap
+                if best is not None:
+                    self.box_links += 1
+                    self._missing.discard(best.id)
+                    best.p_right = .85*best.p_right + .15*right_probability(d)
+                    best.detection, best.last_seen = d, time
+                    records.append(self._observed(best, d, time, "observed"))
+                    matched_tracks.add(best.id)
+                    matched_detections.add(index)
         for index, d in enumerate(detections):
             if index not in matched_detections:
                 t = Track(self.next_id, d, time, right_probability(d))
@@ -195,11 +231,20 @@ class IdentityTracker:
                 self.tracks[t.id] = t
                 matched_tracks.add(t.id)
                 records.append(self._observed(t, d, time, "observed"))
+        observed_boxes = [d.image[:, :2] for d in detections]
         for t in self.tracks.values():
             if t.id in matched_tracks:
                 continue
             self._missing.add(t.id)
             age = time - t.last_seen
+            shifted = t.detection.image[:, :2] + t.velocity*age
+            if self.box_link and age <= self.predict_s and any(
+                    _box_overlap(shifted, box) > .5 for box in observed_boxes):
+                # Its predicted position sits on a hand observed this frame: drawing it would put a
+                # second ("ghost") skeleton on that hand. Report it as lost instead of predicted.
+                self.ghosts_suppressed += 1
+                records.append(record(t, "lost", age))
+                continue
             if age <= self.predict_s:
                 image = t.detection.image.copy()
                 image[:, :2] += t.velocity * age

@@ -146,3 +146,35 @@ def test_presets_fill_only_unset_options():
     assert tiles.rescue_crop is False and tiles.detection_threshold == .3
     override = apply_preset(argparse.Namespace(preset="recall", **{**base, "detection_threshold": .4}))
     assert (override.detection_threshold, override.presence_threshold) == (.4, .3)
+
+
+def _box_hand(x, y=.5, size=.1, side="Left"):
+    import numpy as np
+    from egohand_twin.model import Detection
+    image = np.zeros((21, 3))
+    image[:, 0] = x + np.linspace(0, size, 21)
+    image[:, 1] = y + np.linspace(0, size, 21)
+    return Detection(image, np.zeros((21, 3)), side, .9)
+
+
+def test_box_link_hides_a_predicted_ghost_on_an_observed_hand():
+    from egohand_twin.tracking import IdentityTracker
+    for box_link, expected in ((False, "predicted"), (True, "lost")):
+        t = IdentityTracker(box_link=box_link)
+        first = t.update([_box_hand(.20), _box_hand(.24)], 0.)   # two overlapping tracks
+        ghost = [r["track_id"] for r in first][1]
+        second = t.update([_box_hand(.205)], 1/30)                # one hand observed now
+        state = {r["track_id"]: r["state"] for r in second}
+        assert state[ghost] == expected
+        assert sum(s == "observed" for s in state.values()) == 1
+
+
+def test_box_link_keeps_one_identity_when_the_wrist_jumps_inside_the_same_hand_box():
+    import numpy as np
+    from egohand_twin.tracking import IdentityTracker
+    t = IdentityTracker(box_link=True)
+    tid = t.update([_box_hand(.30, size=.3)], 0.)[0]["track_id"]
+    moved = _box_hand(.30, size=.3)
+    moved.image[0, :2] += [.2, .2]                             # wrist placed elsewhere in the same hand box
+    out = t.update([moved], 1/30)
+    assert [r["track_id"] for r in out if r["state"] == "observed"] == [tid] and t.box_links == 1

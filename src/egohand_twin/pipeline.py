@@ -148,7 +148,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
     detector = video_sink = rerun_sink = None
     tracker = IdentityTracker(args.predict_seconds, args.retain_seconds, not args.no_smoothing,
                               (int(info["width"]), int(info["height"]))
-                              if getattr(args, "tracker_units", "normalized") == "diagonal" else None)
+                              if getattr(args, "tracker_units", "normalized") == "diagonal" else None,
+                              box_link=bool(getattr(args, "box_link", False)))
     rss = psutil.Process()
     peak_rss = rss.memory_info().rss
     latency, sample_rows, events = [], [], []
@@ -333,6 +334,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             "track_state_samples": counts,
             "track_ids_created": tracker.next_id-1 if args.identity == "persistent" else None,
             "reacquisitions": tracker.reacquisitions if args.identity == "persistent" else None,
+            "box_links": tracker.box_links if args.identity == "persistent" else None,
+            "ghosts_suppressed": tracker.ghosts_suppressed if args.identity == "persistent" else None,
             "first_timestamp_s": first_s, "last_timestamp_s": last_s,
             "processing_seconds": elapsed, "end_to_end_fps": processed/elapsed,
             **(extra_metrics or {}),

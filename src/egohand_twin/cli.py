@@ -31,12 +31,12 @@ from .render import fit_image, text, rebuild_replay
 
 PRESETS = {
     "baseline": {"detection_threshold": .5, "presence_threshold": .5, "tracking_threshold": .5, "rescue_crop": False},
-    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True},
+    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True},
     # recall + a second, reverse-time detection pass (offline only; about 2x detector time).
-    "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True,
+    "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True,
                  "bidirectional": True},
     # recall + an RTMDet hand detector for hands MediaPipe's palm detector misses (needs fetch-model --rtm).
-    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True,
+    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True,
                "hand_detector": True},
 }
 
@@ -44,7 +44,7 @@ PRESETS = {
 def apply_preset(args):
     """Fill unset detector options from the preset; explicitly given flags win."""
     for key, value in PRESETS[args.preset].items():
-        if getattr(args, key) is None:
+        if getattr(args, key, None) is None:
             # An explicit --rescue strategy replaces the preset's historical centre crop.
             setattr(args, key, False if key == "rescue_crop" and getattr(args, "rescue", None) else value)
     return args
@@ -234,6 +234,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-smoothing", action="store_true")
     p.add_argument("--tracker-units", choices=["normalized", "diagonal"], default="normalized",
                    help="Association distance units; diagonal is aspect-ratio correct")
+    p.add_argument("--box-link", action="store_true", default=None,
+                   help="Second tracker pass: link a detection to a just-missed track when their hand boxes "
+                        "overlap >50%% (one identity, no predicted ghost over an observed hand)")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
     p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",

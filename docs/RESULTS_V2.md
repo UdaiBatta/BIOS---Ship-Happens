@@ -240,3 +240,10 @@ Idea: MediaPipe finds hands with a palm detector, which misses hidden palms. RTM
 | Depth for RTMPose-only hands vs MediaPipe's own 3D (120 MediaPipe hands, 2D fed in) | median 17.4 mm per joint after rigid alignment; a jointed-finger fit was worse (17.7 mm) and 4× slower |
 
 **Rejected as a default.** The hands RTMDet adds are the ones MediaPipe still cannot read inside the box, and its extra boxes create false positives. RTMDet-nano is small and trained mostly on third-person images. The preset stays available, labelled experimental, only to try on other recording families; it is hidden unless `uv sync --extra hybrid` and `egohand fetch-model --rtm` have run.
+
+## Wrong-hand labels: what was measured (31 Oct 2026)
+
+Two separate failures make the viewer show the wrong hand label:
+
+1. **Ghost skeletons.** A track that misses a frame is drawn as "predicted" for up to 0.15 s. When the hand was re-detected under a new track (a rescue crop placed the wrist outside the wrist gate), the old track's ghost was drawn on top of the observed hand, often with the other side. **Fix (now in `recall`, `accurate`, `hybrid` via `--box-link`):** a just-missed track whose predicted box overlaps a hand observed this frame by more than 50% is reported `lost`, not `predicted`; an unmatched detection inside such a box keeps the old identity. Replayed on the same detections: ghost frames dev 1 → 0, holdout 10 → 6; recall, precision and identity fragments unchanged (observations are untouched).
+2. **Left/right errors.** With two hands observed in one frame, both got the same side in 11/102 dev and 69/165 holdout frames; only 4/69 were the same hand detected twice. Pairing rules (force one left + one right, by MediaPipe's P(right), by position, or both) helped on dev (27 → 29 of 33) but **not on holdout** (33 → 32 of 38; 38 → 38 of 45), so **none was adopted**. Most same-side frames are unlabelled, so the cause (wrong side vs another person's hand) is not measurable with the current labels.

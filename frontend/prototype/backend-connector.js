@@ -95,6 +95,11 @@
       try { messages.push(`${name}: ${await addResultFile(await fileFrom(`runs/${id}/artifacts/${artifact}`, name))}`); }
       catch (error) { messages.push(`${name}: not loaded (${error.message})`); }
     }
+    // Solid hands: a surface generated from the lifted joints (not a fitted hand model).
+    if (window.EgoHandMesh && run.artifacts?.lift) {
+      try { messages.push(`hand surfaces: ${addGeneratedMeshes()}`); }
+      catch (error) { messages.push(`hand surfaces: not built (${error.message})`); }
+    }
     afterResults();
     const video = document.getElementById('video');
     if (video.src && video.src.startsWith('blob:')) URL.revokeObjectURL(video.src);
@@ -114,6 +119,18 @@
       'Coverage counts frames with a tracked wearer hand; that is coverage, not accuracy. Camera-space 3D uses an ASSUMED lens.';
     toast(messages.join(' · ') || 'Run loaded.');
     status(`run ${id.slice(0, 8)} loaded`);
+  }
+
+  function addGeneratedMeshes() {
+    const hands = [];
+    for (const f of S.frames) for (const h of f.hands) {
+      if (HAS_3D.has(h.state) && h.cam_xyz_m) hands.push({ frame_index: f.frame_index, track_id: h.track_id, joints: h.cam_xyz_m });
+    }
+    if (!hands.length) throw new Error('no observed hand has camera-space 3D');
+    const message = applyMesh(EgoHandMesh.forHands(hands), 'lifted joints');
+    S.mesh.label = 'hand surface generated from the 21 lifted joints (typical finger and palm thickness, scaled to the measured palm; not a fitted hand-shape model)';
+    S.mesh.licence = 'same assumed-lens depth caveats as the camera-space 3D';
+    return message;
   }
 
   async function processVideo() {

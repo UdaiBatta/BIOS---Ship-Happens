@@ -25,7 +25,8 @@ Measured on one clip (one of four recording families) with **provisional labels*
 | Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps). Parallel chunked detection (`--workers 2`): 63 s → 50 s for the recall preset, identical detections |
 | Django backend API with job worker | Implemented; 9 backend tests; endpoints answer in 5–32 ms once a run is indexed |
 | Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens; depth moves ±25% with the assumed FOV |
-| Meshes, robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
+| Solid 3D hands in the viewer | Low-poly surface (432 vertices) generated from the 21 lifted joints when a backend run loads: rounded fingers and a palm slab, typical thickness scaled to the measured palm. **Not a fitted hand-shape model** (no MANO/WiLoR); same assumed-lens depth caveats |
+| Fitted meshes (MANO/WiLoR), robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
 
 ## Quick start
 

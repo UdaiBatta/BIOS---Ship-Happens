@@ -498,7 +498,8 @@ def run_compare(request, run_id):
 
 # --------------------------------------------------------------------------- viewer
 FRONTEND_FILES = {"": ("index.html", "text/html; charset=utf-8"),
-                  "backend-connector.js": ("backend-connector.js", "text/javascript; charset=utf-8")}
+                  "backend-connector.js": ("backend-connector.js", "text/javascript; charset=utf-8"),
+                  "hand-mesh.js": ("hand-mesh.js", "text/javascript; charset=utf-8")}
 
 
 def frontend(request, name: str = ""):

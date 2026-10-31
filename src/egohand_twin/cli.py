@@ -19,6 +19,7 @@ from .identity import write_identity, write_identity_jsonl
 from .schema import validate_jsonl
 from .lift import hand_relative_variation, lift_run
 from .compare import compare
+from .conditions import apply_conditions, load_conditions, template as conditions_template
 from .governance import retention_report, template as governance_template
 from .steps import load_steps, write_template
 from .quality import QualityConfig, assess, evaluate_quality, export_segments, write_quality
@@ -80,7 +81,8 @@ def sample_labels(args):
 
 def evaluate_command(a):
     result = evaluate(Path(a.run), Path(a.labels), a.wrist_threshold, a.pck_threshold,
-                      a.allow_provisional, split=a.split)
+                      a.allow_provisional, split=a.split,
+                      conditions=Path(a.conditions) if a.conditions else None)
     if a.summary:
         result = {k: v for k, v in result.items() if k not in ("false_positive_predictions", "missed_hands")}
     print(json.dumps(result, indent=2))
@@ -104,6 +106,14 @@ def validate_command(a):
     print(json.dumps(result, indent=2))
     if not result["valid"]:
         sys.exit(2)
+
+
+def conditions_init(a):
+    out = Path(a.out)
+    if out.exists():
+        raise ValueError("File exists; choose a new filename (never overwritten)")
+    out.write_text(json.dumps(conditions_template(sha256(Path(a.video))), indent=2)+"\n")
+    print(out)
 
 
 def governance_init(a):
@@ -175,6 +185,7 @@ def main():
                    help="Score unreviewed v2 labels; results are stamped provisional")
     p.add_argument("--summary", action="store_true", help="Omit per-frame miss/false-positive lists")
     p.add_argument("--split", help="Only score frames from this label split (e.g. dev or holdout)")
+    p.add_argument("--conditions", help="conditions.json: exclude flagged frames (reported) and slice recall by condition")
     p.set_defaults(func=evaluate_command)
     p = commands.add_parser("identity", help="Offline whole-track left/right vote -> RUN/identity.json")
     p.add_argument("run")
@@ -227,6 +238,16 @@ def main():
     p.add_argument("run")
     p.add_argument("--file", default="landmarks.jsonl", help="JSONL file inside the run (e.g. landmarks.identity.jsonl)")
     p.set_defaults(func=validate_command)
+    p = commands.add_parser("conditions-init", help="Write an empty conditions.json bound to a source video")
+    p.add_argument("video")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=conditions_init)
+    p = commands.add_parser("conditions-apply",
+                            help="Write <file>.conditions.jsonl with frame conditions/exclusions (input unchanged)")
+    p.add_argument("run")
+    p.add_argument("conditions")
+    p.add_argument("--file", default="landmarks.jsonl")
+    p.set_defaults(func=lambda a: print(apply_conditions(Path(a.run), Path(a.conditions), a.file)))
     p = commands.add_parser("governance-init", help="Write a governance.json template to fill in")
     p.add_argument("--out", required=True)
     p.set_defaults(func=governance_init)

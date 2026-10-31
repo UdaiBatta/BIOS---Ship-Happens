@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from .conditions import condition_at, load_conditions
+
 WEARER_SIDES = {"wearer_left": "Left", "wearer_right": "Right"}
 
 
@@ -101,11 +103,14 @@ class _Counter:
 
 
 def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
-             allow_provisional=False, audit_thresholds=(.05, .10), split=None):
+             allow_provisional=False, audit_thresholds=(.05, .10), split=None, conditions=None):
     if not (run/"COMPLETE").exists():
         raise ValueError("Run is incomplete")
+    split_filter = split
     manifest = json.loads((run/"manifest.json").read_text())
     annotations = load_labels(labels, manifest["source"]["sha256"], allow_provisional)
+    intervals = load_conditions(conditions, manifest["source"]["sha256"]) if conditions else None
+    excluded = {"frames": 0, "labeled_hands": 0, "reasons": {}}
     if split is not None:
         annotations["frames"] = [f for f in annotations["frames"] if f["split"] == split]
         if not annotations["frames"]:
@@ -149,6 +154,14 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
         seen_frames.add(index)
         if index not in predictions:
             raise ValueError(f"Annotated frame {index} was not processed")
+        condition = condition_at(intervals, predictions[index]["timestamp_s"]) if intervals else None
+        if condition and condition["excluded"]:
+            # Excluded frames are reported, never silently dropped.
+            excluded["frames"] += 1
+            excluded["labeled_hands"] += len(frame["hands"])
+            reason = condition["exclusion_reason"]
+            excluded["reasons"][reason] = excluded["reasons"].get(reason, 0) + 1
+            continue
         gt = frame["hands"]  # Must list ALL visible, labelable hands in this frame.
         pred = [p for p in predictions[index]["hands"] if p["observed"]]
         split = frame["split"]
@@ -186,6 +199,9 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
             keys = ["all", f"split={split}", f"visibility={g['visibility']}",
                     f"split={split}|visibility={g['visibility']}", f"side={g['side']}"]
             keys += [f"tag={t}" for t in g["tags"]]
+            if intervals is not None:
+                for k in ("glove_ppe", "occlusion", "lighting"):
+                    keys.append(f"condition.{k}={condition[k] if condition else 'not_annotated'}")
             for key in keys:
                 counter = groups[key]
                 if r in matched_gt:
@@ -246,7 +262,9 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
     return {
         "label_status": annotations["_status"],
         "label_schema_version": str(annotations.get("schema_version", "1")),
-        "split_filter": split,
+        "split_filter": split_filter,
+        "conditions_file": str(conditions) if conditions else None,
+        "excluded_by_conditions": excluded if conditions else None,
         "labeled_frames": len(seen_frames),
         "frames_with_labeled_hands": frames_with_gt,
         "frames_with_labeled_hands_and_observed_prediction": frames_with_gt_and_pred,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import importlib.metadata
 import json
 from pathlib import Path
@@ -17,6 +18,7 @@ from .evaluation import evaluate
 from .identity import write_identity
 from .lift import hand_relative_variation, lift_run
 from .compare import compare
+from .governance import retention_report, template as governance_template
 from .steps import load_steps, write_template
 from .quality import QualityConfig, assess, evaluate_quality, export_segments, write_quality
 from .model import fetch_model, sha256
@@ -96,6 +98,14 @@ def quality_command(a):
     print(json.dumps(summary, indent=2))
 
 
+def governance_init(a):
+    out = Path(a.out)
+    if out.exists():
+        raise ValueError("File exists; choose a new filename (never overwritten)")
+    out.write_text(json.dumps(governance_template(), indent=2)+"\n")
+    print(out)
+
+
 def main():
     parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -122,6 +132,8 @@ def main():
     p.add_argument("--crop-max-side", type=int, help="Area-downscale each rescue crop to at most this many pixels")
     p.add_argument("--dedupe", choices=["landmarks", "wrist"], default="landmarks",
                    help="Duplicate rule for --rescue candidates")
+    p.add_argument("--governance", help="governance.json (purpose, consent, retention, redaction, lens source); "
+                                        "validated before processing, copied into manifest.json")
     p.add_argument("--timestamp-source", choices=["auto", "frames"], default="auto",
                    help="auto: verified packet PTS (fast); frames: decode every frame with FFprobe")
     p.add_argument("--no-smoothing", action="store_true")
@@ -199,6 +211,14 @@ def main():
     p.add_argument("run")
     p.add_argument("steps")
     p.set_defaults(func=lambda a: print(json.dumps(load_steps(Path(a.steps), Path(a.run)), indent=2)))
+    p = commands.add_parser("governance-init", help="Write a governance.json template to fill in")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=governance_init)
+    p = commands.add_parser("retention-report", help="List runs and their retention status (never deletes)")
+    p.add_argument("root", nargs="?", default="runs")
+    p.add_argument("--today", help="ISO date to evaluate against (default: today)")
+    p.set_defaults(func=lambda a: print(json.dumps(retention_report(
+        Path(a.root), date.fromisoformat(a.today) if a.today else date.today()), indent=2)))
     p = commands.add_parser("sample-labels", help="Create private annotation frames and an unlabeled template")
     p.add_argument("video")
     p.add_argument("--out", required=True)

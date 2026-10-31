@@ -179,6 +179,32 @@ uv run pytest -q
 
 Detection matching uses raw observed wrists within 0.10 of the image diagonal (configurable). Precision/recall are only meaningful under that matching protocol. PCK@0.03 diagonal is reported on matched hands if joint labels exist; missing detections are reported separately. Sampled ID switches count changes in associated track ID for the same annotated identity between matched samples. Sparse labels miss events and do not give full-sequence ID-switch counts. No 3D error or industrial productivity result is claimed without appropriate ground truth/testing. Detection coverage is **not recall**.
 
+## Governance, retention and lens provenance (manifest schema 0.4)
+
+```sh
+uv run egohand governance-init --out data/private/governance.json   # fill in; keep private
+uv run egohand process $V --out runs/clip_v3 --governance data/private/governance.json ...
+uv run egohand retention-report runs                                # lists runs; never deletes
+```
+
+`governance.json` records:
+- purpose and data source;
+- consent status, retention date, redaction status and access;
+- capture details: device, placement, lens model, intrinsics, intrinsics source and calibration version.
+
+It is validated **before** any decoding. The run is rejected if:
+- a key is unknown (personal fields such as worker names are refused);
+- the retention date has passed;
+- an own recording lacks written consent;
+- organizer footage is marked public;
+- intrinsics are declared calibrated but missing, or present while the source is `none`.
+
+What happens next:
+- The values are copied into `manifest.json`, the quality summary and segment-export manifests, and lift summaries.
+- Without a file, the manifest says `not_recorded`; it never implies consent.
+- These are operator statements; the software does not verify them.
+- With `intrinsics_source` `none` or `assumed_fov`, any metric camera-space geometry is marked experimental.
+
 ## Privacy and submission
 
 `data/`, `runs/`, `models/`, videos, Rerun recordings and NPZ exports are ignored in ordinary source commits. All derived outputs can reveal private task motion and must stay private along with source footage. At the user's request, a restricted reference set is attached to a private repository release for authorized continuation; see [access and restoration](docs/REFERENCE_ARTIFACTS.md). Keep this repository private while those assets are attached. Use the designated private submission folder for the official processed-clip submission, and prepare a separate source-only repository if public access is required. Model assets are downloaded separately from the official source.

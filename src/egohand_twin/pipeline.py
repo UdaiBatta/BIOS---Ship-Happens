@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import importlib.metadata
 import json
 from pathlib import Path
@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 import psutil
 
+from .governance import load as load_governance
 from .model import COORDINATES, MODEL_URL, CropRescueDetector, Detector, MultiViewDetector, sha256
 from .render import RerunSink, VideoSink, composite
 from .tracking import IdentityTracker, baseline_records
@@ -102,6 +103,9 @@ def process(args):
         raise FileNotFoundError("Model missing. Run: egohand fetch-model")
     if out.exists() and any(out.iterdir()):
         raise ValueError("Output directory is nonempty; choose a new --out directory")
+    # Fail before any decoding if the governance file is invalid or already past retention.
+    governance = load_governance(Path(args.governance) if getattr(args, "governance", None) else None,
+                                 date.today())
     stages = {k: 0. for k in ["probe", "setup", "decode", "resize_convert", "detect",
                               "track", "export_rows", "render_video", "rerun_log", "finalize"]}
     mark = time.perf_counter()
@@ -306,7 +310,7 @@ def process(args):
         }
         (out/"metrics.json").write_text(json.dumps(metrics, indent=2)+"\n")
         manifest = {
-            "schema_version": "0.3", "created_utc": datetime.now(timezone.utc).isoformat(),
+            "schema_version": "0.4", "created_utc": datetime.now(timezone.utc).isoformat(),
             "source": {"name": source.name, "sha256": sha256(source),
                        "width": int(info["width"]), "height": int(info["height"]),
                        "fps": info["fps"], "cfr": info["cfr"], "total_frames": len(info["timestamps"]),
@@ -321,6 +325,7 @@ def process(args):
             "preview": {"audio": False, "time_origin_s": first_s,
                         "note": "Muted CFR inspection render; source timestamps are printed on each frame."},
             "privacy": "Source footage and all derived artifacts must stay outside the public repository.",
+            **governance,
         }
         (out/"manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
         (out/"COMPLETE").write_text("Processing completed successfully.\n")

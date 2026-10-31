@@ -163,6 +163,7 @@ def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: 
     summary = {
         "schema_version": LIFT_SCHEMA_VERSION, "status": "EXPERIMENTAL - assumed lens, unvalidated depth",
         "camera": camera.describe(),
+        "declared_capture": manifest.get("capture") or {"status": "not_recorded (pre-0.4 run)"},
         "observed_hands": n, "lifted": len(ok), "rejections": reasons,
         "hand_center_depth_m": q(depth), "wrist_depth_m": q(wrist_depth),
         "fraction_wrist_depth_0p2_0p9m": float(np.mean((wrist_depth >= .2) & (wrist_depth <= .9))) if wrist_depth.size else None,

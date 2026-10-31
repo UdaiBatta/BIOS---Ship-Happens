@@ -29,7 +29,10 @@ Primary user: a data engineer preparing factory demonstrations for hand-motion a
 - Verified fast timestamp path: packet PTS identical to decoded-frame timestamps on all 5,400 frames, checked automatically at runtime with fallback; per-stage timing in `metrics.json`.
 - Split-aware labeling tool and an evaluator for recall/precision with intervals, recall by visibility and side, left/right confusion, ID changes, a wrist-gate audit and lists of missed hands and false positives.
 - Quality signals, review queue, segment export and a quality timeline in Rerun. These run end-to-end on real footage; the review experiment is still pending (see B).
-- 37 automated tests.
+- Reliability shown in the replay: per-track state lanes, side probability, inferred `missing_reason` (measured: often wrong at the image edge), units and coordinate frames in view titles.
+- Teach-back helpers: same-moment flat-vs-3D image (`compare`) and a `steps.json` sidecar with reviewer sign-off.
+- Governance and lens provenance in `manifest.json` (schema 0.4), validated before processing, plus a retention report that never deletes anything.
+- 65 automated tests.
 
 **B. Implemented, not adequately validated**
 - **Labels:** 96 frames / 150 hands, all **provisional**. A single annotator from the coding session read them visually from grid overlays; they have **not been independently reviewed by a person**. Every number computed from them is stamped provisional.

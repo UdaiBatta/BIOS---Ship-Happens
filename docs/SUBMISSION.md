@@ -58,6 +58,7 @@ Current status (v2): see [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) for the audit, [RE
 - [ ] A team member reviews `labels_v2_provisional.json` (uncertain-side and truncated hands first), sets `reviewed=true` only after review, and re-runs the commands in RESULTS_V2 §8.
 - [ ] Process at least one clip from each other recording family (blocked here: Drive downloads not reachable from this environment).
 - [ ] Ask the organizers the drafted questions in PRODUCT_BRIEF.md (lens intrinsics, QA framing, sharing of processed outputs).
+- [ ] When the organizers answer, set `consent_status` and `retention_until` in `data/private/governance_mytronlabs.json` (currently `unknown` / null) and reprocess the demo runs with `--governance`. `egohand retention-report runs` currently lists 34 of 35 runs as `governance_not_recorded` (all created before schema 0.4).
 - [ ] Run the review-time pilot (protocol in DEMO_AND_QA.md) or present the benefit as untested.
 - [ ] Record the demo from the chosen-configuration run with `--quality` replay.
 

@@ -88,7 +88,7 @@ Each answer has: a short answer (20–30 s), its **evidence**, a longer technica
 - *Fallback:* the thresholds are not validated beyond this clip.
 
 **10. Is the system privacy/compliance certified?**
-- *Short:* no. We have no privacy detector. Footage and outputs stay private and are ignored by git.
+- *Short:* no. We have no privacy detector. Each run records purpose, consent status, retention date, redaction status and lens source in its manifest. Processing refuses runs past their retention date, and `retention-report` lists runs for deletion review. These are operator statements, not verified compliance. Footage and outputs stay private and are ignored by git.
 - *Fallback:* candidate face/screen/text flags are future work and need a labeled evaluation set.
 
 **11. Can it process the whole dataset (about 100 TB)?**

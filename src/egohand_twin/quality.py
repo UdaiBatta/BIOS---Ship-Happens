@@ -282,6 +282,7 @@ def assess(run: Path, video: Path, cfg: QualityConfig | None = None) -> dict:
         "source": {"name": manifest["source"]["name"], "sha256": source_hash},
         "run": {"path": str(run), "manifest_sha256_12": run_id,
                 "parameters": manifest.get("parameters")},
+        "governance": manifest.get("governance") or {"status": "not_recorded (pre-0.4 run)"},
         "config": {**asdict(cfg), "digest": cfg.digest()},
         "processed_frames": len(hand), "interval_s": [t0, hand[-1]["timestamp_s"]],
         "windows": len(assessed),
@@ -449,6 +450,7 @@ def export_segments(run: Path, out: Path, status: str = "suitable", quality_dir:
     manifest = {"export_status": status, "segments": index,
                 "source": summary["source"], "run": summary["run"],
                 "quality_config_digest": summary["config"]["digest"],
+                "governance": summary.get("governance") or {"status": "not_recorded (pre-0.4 run)"},
                 "coordinates": "As in landmarks.jsonl: normalized image xyz and MediaPipe hand-relative meters; "
                                "not camera or factory coordinates.",
                 "note": "Selection is a heuristic quality assessment, not human review."}

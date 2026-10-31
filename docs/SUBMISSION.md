@@ -49,6 +49,20 @@ See [the complete measured report](MILESTONE_REPORT.md) for inference latency, m
 
 ## Submission checklist
 
+Current status (v2): see [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) for the audit, [RESULTS_V2.md](RESULTS_V2.md) for measurements and [DEMO_AND_QA.md](DEMO_AND_QA.md) for the demo and Q&A. The short description above remains accurate. Add one sentence: "A heuristic quality layer marks each second as suitable, needs review or insufficient evidence for hand-motion inspection and produces a timestamped review queue and traceable segment exports."
+
+- [x] Split-aware dev/holdout labels: 96 frames, 150 hands. **Provisional — independent human review still required.**
+- [x] Detection recovery chosen on dev and scored once on holdout (recall 0.24 → 0.50, precision 39/40; provisional labels, one clip).
+- [x] Quality windows, review queue, segment export, Rerun quality timeline; flag evaluation and false-alarm burden reported.
+- [x] Verified fast timestamp probe and per-stage timing.
+- [ ] A team member reviews `labels_v2_provisional.json` (uncertain-side and truncated hands first), sets `reviewed=true` only after review, and re-runs the commands in RESULTS_V2 §8.
+- [ ] Process at least one clip from each other recording family (blocked here: Drive downloads not reachable from this environment).
+- [ ] Ask the organizers the drafted questions in PRODUCT_BRIEF.md (lens intrinsics, QA framing, sharing of processed outputs).
+- [ ] Run the review-time pilot (protocol in DEMO_AND_QA.md) or present the benefit as untested.
+- [ ] Record the demo from the chosen-configuration run with `--quality` replay.
+
+Historical checklist:
+
 - [x] Working MediaPipe PS4 skeleton baseline.
 - [x] Source code, dependency lock, setup instructions and automated tests.
 - [x] Real-footage comparison with measured runtime and explicit limitations.

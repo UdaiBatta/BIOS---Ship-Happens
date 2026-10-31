@@ -2,7 +2,16 @@
 
 Offline reconstruction and inspection of hand posture from factory POV video. This first milestone implements MediaPipe's 21 image landmarks and 21 estimated hand-relative 3D landmarks, short-term identity tracking, explicit missing-data states, and synchronized replay. Meshes, calibrated camera poses, and absolute factory coordinates are not implemented.
 
-See [the measured milestone report](docs/MILESTONE_REPORT.md) for the real-footage results and known detection failures.
+**Product direction (31 Oct, revised):** reconstruct hand motion from factory POV footage and help data teams find useful, uncertain and problematic segments to review. See the [product brief and status audit](docs/PRODUCT_BRIEF.md), the [v2 measured results](docs/RESULTS_V2.md) and the [demo script and judges' Q&A](docs/DEMO_AND_QA.md). The [first milestone report](docs/MILESTONE_REPORT.md) is kept as the historical baseline.
+
+| Capability | Status |
+| --- | --- |
+| 21 image + 21 hand-relative 3D landmarks, tracking with explicit states, raw vs filtered exports, synchronized replay | Implemented and verified on real footage |
+| Detection recovery (`--rescue-crop` + 0.3 thresholds) | Implemented. Holdout recall 19/78 → 39/78, precision 39/40, on **provisional, not yet human-reviewed** labels from one clip |
+| Quality windows, review queue, segment export, Rerun quality timeline | Implemented, heuristic; flag catch rate and false-alarm burden measured on provisional labels |
+| Verified fast timestamp probe, per-stage timing | Implemented and verified |
+| Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens, depth unvalidated |
+| Meshes, robot export, SLAM, privacy flags, semantic actions | Not implemented |
 
 **Hackathon category:** PS4 — 3D Hand Motion. **Current status:** functioning MediaPipe skeleton baseline, tested on a 30-second interval from one supplied factory clip. Mesh reconstruction and calibrated world-space tracking remain pending. The [submission guide](docs/SUBMISSION.md) contains a concise project summary, measured results and the remaining deliverables.
 
@@ -51,6 +60,35 @@ uv run egohand process data/private/clip.mp4 --out runs/clip_baseline --duration
 
 `--rescue-crop` is an **experimental, opt-in** detector fallback. When fewer than the requested number of hands are found, an independent image-mode detector checks a fixed center/lower crop, maps its image coordinates back to the full frame, and suppresses candidates whose wrists are within 0.10 normalized image units of an existing detection. Local 3D axes remain unchanged because the crop does not rotate the image. The crop can improve visible detection coverage but can also add false positives or duplicate hands; it is not a proven accuracy improvement. Its origin is recorded as `center_crop_rescue` in JSONL. Compare it against the identical tracker settings without rescue.
 
+## Detection recovery, quality review and exports (v2)
+
+```sh
+V=data/private/clip.mp4
+T="--detection-threshold .3 --presence-threshold .3 --tracking-threshold .3"
+uv run egohand process $V --out runs/clip_v2 --duration 30 --rrd --rescue-crop $T   # chosen on dev labels
+uv run egohand quality runs/clip_v2 $V                                            # -> runs/clip_v2/quality/
+uv run egohand replay $V runs/clip_v2 --out runs/clip_v2/review.rrd --quality runs/clip_v2/quality
+uv run egohand export-segments runs/clip_v2 --out runs/clip_v2_suitable --status suitable
+```
+
+The default detector settings are unchanged, so historical runs reproduce. Further experimental options:
+- `--rescue guided,center,tiles` with `--max-crops` and `--crop-max-side` for full-resolution crops.
+- `--tracker-units diagonal`.
+- `egohand identity RUN` for an offline whole-track side vote.
+- `egohand lift RUN --hfov 120 150 180` for camera space under an assumed lens.
+
+`--timestamp-source frames` restores the slow full-decode timestamp probe; the default uses packet PTS, verified against decoded frames, with automatic fallback.
+
+`quality/` contains:
+- `quality_frames.csv`: per-frame signals.
+- `quality_windows.json`: 1 s windows labeled `suitable`, `needs_review` or `insufficient_evidence`, with reason codes and evidence.
+- `review_queue.csv` / `.json`: ranked intervals of at most 5 s, with track IDs, reasons, suggested actions, source hash and run id.
+- `quality_summary.json`: per-clip summary.
+
+These are **heuristic, task-specific** assessments for hand-motion inspection. *Insufficient evidence* means no *observed* hand, not no hand. Nothing is deleted or hidden.
+
+Labels for evaluation: `egohand annotation-set` creates split-aware frames, grid sheets and a v2 template (gt_id, wearer side, visibility, tags, provenance). `egohand evaluate ... --split dev|holdout` scores them. Unreviewed v2 labels need `--allow-provisional`, and their results are stamped provisional.
+
 ## Outputs
 
 | File | Content |
@@ -70,7 +108,8 @@ Timestamp zero is the first source presentation timestamp; a selected interval p
 ## Coordinate and reliability contract
 
 - `image_xyz_raw`: normalized x/y, with wrist-relative model depth z measured in approximately x-normalized units. It is **not metric depth**.
-- `world_xyz_m_raw`: MediaPipe's estimated meter coordinates with an origin near each hand's geometric center. These are **not absolute factory/world positions**. They have not been calibrated or validated against 3D ground truth.
+- `world_xyz_m_raw`: MediaPipe's estimated meter coordinates with an origin near each hand's geometric center. These are **not absolute factory/world positions**. They have not been calibrated or validated against 3D ground truth. On the test clip the raw bone lengths of a track vary (median coefficient of variation 0.15).
+- `lift_hfov*.npz` (experimental, separate files): camera coordinates (x right, y down, z forward) from PnP under an **assumed** equidistant fisheye. Depth changes by ±25% across assumed FOVs of 120–180°, and reprojection error cannot tell them apart. Not factory coordinates and not validated.
 - `image_xyz` and `world_xyz_m`: One Euro filtered values, or raw values with `--no-smoothing`. Raw estimates remain available for evaluation. Smoothing may add latency and does not establish improved accuracy.
 - Rendering subtracts the wrist independently from each hand. Hand spacing in the 3D display is arbitrary; inter-hand distance and wrist trajectories cannot be read as factory geometry.
 - `handedness_score` is a left/right classifier score, **not landmark/detection quality**. MediaPipe's confidence thresholds control detection internally; per-joint confidence is not fabricated.
@@ -130,7 +169,11 @@ src/egohand_twin/
   pipeline.py     Timestamped processing, exports and measured performance
   render.py       Video composition and synchronized Rerun replay
   evaluation.py   Explicit-label precision, recall and sampled ID-switch evaluation
-tests/            Tracking, coordinate mapping and evaluation checks
+  annotate.py     Split-aware annotation sets and v2 label template
+  identity.py     Offline whole-track left/right vote (unknown allowed)
+  quality.py      Quality signals, windows, review queue, segment export
+  lift.py         EXPERIMENTAL camera-space PnP under an assumed lens
+tests/            Tracking, detection crops, evaluation, quality and lift checks
 docs/             Measured results, submission guide and remaining milestones
 pyproject.toml    Package, command entry point and dependencies
 uv.lock           Locked dependency versions

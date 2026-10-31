@@ -56,3 +56,11 @@ venv/
 .env
 .ipynb_checkpoints/
 .DS_Store
+
+# ---- From the milestone pipeline (main) ----
+.pytest_cache/
+*.egg-info/
+models/
+runs/
+private/
+*.rrd

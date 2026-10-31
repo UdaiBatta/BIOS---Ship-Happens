@@ -63,9 +63,11 @@ def api(methods: tuple[str, ...]):
 
 
 def body(request) -> dict:
+    if request.content_type != "application/json":
+        raise ApiError("Content-Type must be application/json", 415)
     try:
         data = json.loads(request.body or b"{}")
-    except json.JSONDecodeError:
+    except (ValueError, UnicodeDecodeError):
         raise ApiError("request body must be JSON")
     if not isinstance(data, dict):
         raise ApiError("request body must be a JSON object")
@@ -217,8 +219,17 @@ def run_detail(request, run_id):
     if request.method == "DELETE":
         if run.status in (Run.Status.QUEUED, Run.Status.RUNNING) or run.finished_at is None:
             raise ApiError("the run is queued, running or still stopping; cancel it and wait until it has finished", 409)
-        if run.out_dir and Path(run.out_dir).resolve().parent == settings.RUNS_DIR.resolve():
-            shutil.rmtree(run.out_dir, ignore_errors=True)  # only directories this backend created
+        if run.out_dir:
+            output = Path(run.out_dir)
+            if output.resolve() != (settings.RUNS_DIR/str(run.id)).resolve() or output.is_symlink():
+                raise ApiError("run output is outside its backend directory", 409)
+            try:
+                shutil.rmtree(output)
+            except FileNotFoundError:
+                if output.exists():
+                    raise ApiError("could not remove run output; retry deletion", 503)
+            except OSError as error:
+                raise ApiError(f"could not remove run output; retry deletion: {error}", 503)
         run.delete()
         return HttpResponse(status=204)
     data = run.as_dict(detail=True)

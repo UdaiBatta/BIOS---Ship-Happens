@@ -15,7 +15,13 @@ class CorsMiddleware:
 
     def __call__(self, request):
         origin = request.headers.get("Origin")
-        allowed = origin in settings.CORS_ALLOWED_ORIGINS
+        allowed = origin != "null" and origin in settings.CORS_ALLOWED_ORIGINS
+        if request.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
+            same_origin = origin == f"{request.scheme}://{request.get_host()}"
+            untrusted_origin = origin is not None and not (same_origin or allowed)
+            untrusted_site = origin is None and request.headers.get("Sec-Fetch-Site") in ("cross-site", "same-site")
+            if untrusted_origin or untrusted_site:
+                return JsonResponse({"error": "untrusted request origin"}, status=403)
         if request.method == "OPTIONS" and allowed:
             response = HttpResponse(status=204)
         else:

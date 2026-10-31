@@ -17,6 +17,7 @@ import socket
 import time
 import traceback
 
+import psutil
 from django.conf import settings
 from django.db import close_old_connections
 from django.utils import timezone
@@ -139,13 +140,7 @@ def _alive(worker_id: str) -> bool:
     host, _, pid = worker_id.rpartition(":")
     if host != socket.gethostname() or not pid.isdigit():
         return True  # another machine (or unknown): never steal its run
-    try:
-        os.kill(int(pid), 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return psutil.pid_exists(int(pid))
 
 
 def recover_stale() -> int:
@@ -159,10 +154,12 @@ def recover_stale() -> int:
     dead = [r for r in Run.objects.filter(status__in=[Run.Status.RUNNING, Run.Status.CANCELLED],
                                           finished_at__isnull=True)
             if not r.worker_id or not _alive(r.worker_id)]
-    failed = Run.objects.filter(pk__in=[r.pk for r in dead if r.status == Run.Status.RUNNING]).update(
+    failed = Run.objects.filter(pk__in=[r.pk for r in dead if r.status == Run.Status.RUNNING],
+                                status=Run.Status.RUNNING, finished_at__isnull=True).update(
         status=Run.Status.FAILED, stage="failed", error="Worker stopped before the run finished; re-submit.",
         finished_at=now)
-    Run.objects.filter(pk__in=[r.pk for r in dead if r.status == Run.Status.CANCELLED]).update(
+    Run.objects.filter(pk__in=[r.pk for r in dead],
+                       status=Run.Status.CANCELLED, finished_at__isnull=True).update(
         stage="cancelled", finished_at=now)
     return failed
 

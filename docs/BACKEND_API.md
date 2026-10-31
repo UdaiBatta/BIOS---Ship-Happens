@@ -31,7 +31,8 @@ Environment variables (all optional):
 
 ## Conventions
 
-- **JSON:** everything is JSON except media. Errors are `{"error": "..."}` with status 400 (bad input), 401 (token), 403 (path not allowed), 404 (not found), 405 (method), 409 (not ready: run not complete or artifact missing).
+- **JSON:** everything is JSON except media. JSON request bodies require `Content-Type: application/json` (a charset is allowed); uploads use multipart. Errors are `{"error": "..."}` with status 400 (bad input), 401 (token), 403 (path or request origin not allowed), 404 (not found), 405 (method), 409 (not ready or unsafe run output path), 415 (wrong JSON content type), or 503 (run output deletion failed; retry).
+- **Browser writes:** POST, PUT, PATCH and DELETE under `/api/` accept the service's own origin or an origin in `EGOHAND_CORS_ORIGINS`. Cross-site browser requests without an `Origin` are rejected. CLI requests without browser origin headers remain supported.
 - **Time:** times are seconds on the **run time base**: seconds since the first presentation timestamp of the source video, the same as `timestamp_s` in frames. The proxy video starts at `start_s`, so `run_time = run.start_s + video.currentTime`.
 - **Image coordinates:** `image_xyz` x and y are normalized to the frame (0–1). To draw on a `<video>` element, multiply by the displayed video width and height (keep the aspect ratio; the proxy is 960 px wide, 16:9 for the official clips). z is model depth, not metric.
 - **3D:** `world_xyz_m` is MediaPipe's hand-relative estimate in metres (origin near the hand centre). It is **not** camera or factory coordinates; spacing between hands in a 3D view is arbitrary.
@@ -71,7 +72,7 @@ Environment variables (all optional):
 | `GET /api/runs` | `?video_id=&status=` | `{runs: [Run]}` (newest first) |
 | `GET /api/runs/<id>` | — | `Run` plus `metrics`, `quality_summary` and `video`. **Poll this about once per second while running.** |
 | `POST /api/runs/<id>/cancel` | — | `Run` (`cancelled`); 409 if already finished |
-| `DELETE /api/runs/<id>` | — | 204; deletes the outputs this backend created; 409 while queued or running |
+| `DELETE /api/runs/<id>` | — | 204 after deleting the outputs this backend created; 409 while queued or running; 503 if output removal fails (record remains for retry) |
 
 `Run = {id, video_id, preset, start_s, duration_s, workers, render_preview, write_rrd, status, stage, progress, error, created_at, started_at, finished_at}`
 - `status`: `queued | running | complete | failed | cancelled`.

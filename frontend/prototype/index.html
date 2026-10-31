@@ -186,8 +186,8 @@
   <span class="sep"></span>
   <span class="note">3D:</span>
   <div class="seg" id="segMode" role="group" aria-label="3D mode">
-    <button data-v="ours" aria-pressed="true" title="Both hands placed in camera space (lens model + PnP)">Ours · camera-space</button>
-    <button data-v="baseline" aria-pressed="false" title="MediaPipe world landmarks, hand-relative, arbitrary spacing">Baseline · hand-relative</button>
+    <button data-v="ours" aria-pressed="true" title="Both hands placed in APPROXIMATE camera space: PnP under an assumed (uncalibrated) fisheye lens; depth unvalidated">Ours · approx. camera-space</button>
+    <button data-v="baseline" aria-pressed="false" title="MediaPipe world landmarks: hand-relative 3D only, hands placed at arbitrary spacing">Baseline · hand-relative</button>
   </div>
   <div class="seg" id="segSmooth" role="group" aria-label="Raw or smoothed">
     <button data-v="smooth" aria-pressed="true">Smoothed</button>
@@ -813,7 +813,8 @@ function drawThree() {
       for (let j = 0; j < 21; j++) { const A = P(pts[j]); drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
     } else if (S.display === 'both') overlay.push(pts.map(P));
     const meshTag = ours && S.mesh && S.display !== 'skeleton' && side !== 'other' ? (mesh ? ` · ${S.mesh.backend} mesh` : ' · no mesh (skeleton)') : '';
-    const depthTag = ours && hnd.cam_xyz_m ? ` · ${num(wristDepth(hnd), 2)} m` : '';
+    // Not a measured distance: assumed lens + MediaPipe's learned hand size. Shown as an estimate.
+    const depthTag = ours && hnd.cam_xyz_m ? ` · ≈${num(wristDepth(hnd), 1)} m est.` : '';
     drawList.push({ d: 0, kind: 'label', A: P(pts[0]), col, text: `${SIDE_LABEL[side] || side}${depthTag}${meshTag}` });
   }
   if (ours && $('chkTrails').checked) {
@@ -1496,6 +1497,7 @@ new ResizeObserver(() => (S.dirty = true)).observe(document.body);
 let lastIdx = -1;
 function tick(now) {
   if (S.playing) {
+    const before = S.t;
     if (S.video && S.video.ended) setPlaying(false);
     else {
       // One clock: the media time of the frame the browser actually PRESENTED (requestVideoFrameCallback).
@@ -1506,7 +1508,10 @@ function tick(now) {
       S.lastTick = now;
       if (S.t >= S.tEnd) { S.t = S.tEnd - 1e-3; setPlaying(false); }
     }
-    S.idx = indexAt(S.t); S.dirty = true;
+    S.idx = indexAt(S.t);
+    // Redraw only when the shown time changed: with a video this is once per PRESENTED frame (30/s),
+    // not on every display refresh (60/s), which halved the drawing work during playback.
+    if (S.t !== before) S.dirty = true;
   }
   if (S.dirty) {
     drawVideo(); drawThree(); drawLanes(); drawSignals(); renderHeader();

@@ -197,7 +197,7 @@
     }
     if (!hands.length) throw new Error('no observed hand has camera-space 3D');
     const message = applyMesh(EgoHandMesh.forHands(hands), 'lifted joints');
-    S.mesh.label = 'hand surface generated from the 21 lifted joints (typical finger and palm thickness, scaled to the measured palm; not a fitted hand-shape model)';
+    S.mesh.label = 'procedural low-poly hand skinned on the 21 lifted joints (typical proportions, one size per track; not a fitted hand-shape model)';
     S.mesh.licence = 'same assumed-lens depth caveats as the camera-space 3D';
     return message;
   }

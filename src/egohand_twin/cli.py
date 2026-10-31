@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 import psutil
 
+from .annotate import make_annotation_set, parse_intervals
 from .evaluation import evaluate
 from .model import fetch_model, sha256
 from .pipeline import probe, process
@@ -69,6 +70,14 @@ def sample_labels(args):
     print(out/"contact_sheet.jpg")
 
 
+def evaluate_command(a):
+    result = evaluate(Path(a.run), Path(a.labels), a.wrist_threshold, a.pck_threshold,
+                      a.allow_provisional, split=a.split)
+    if a.summary:
+        result = {k: v for k, v in result.items() if k not in ("false_positive_predictions", "missed_hands")}
+    print(json.dumps(result, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -109,8 +118,11 @@ def main():
     p.add_argument("labels")
     p.add_argument("--wrist-threshold", type=float, default=.1)
     p.add_argument("--pck-threshold", type=float, default=.03)
-    p.set_defaults(func=lambda a: print(json.dumps(evaluate(
-        Path(a.run), Path(a.labels), a.wrist_threshold, a.pck_threshold), indent=2)))
+    p.add_argument("--allow-provisional", action="store_true",
+                   help="Score unreviewed v2 labels; results are stamped provisional")
+    p.add_argument("--summary", action="store_true", help="Omit per-frame miss/false-positive lists")
+    p.add_argument("--split", help="Only score frames from this label split (e.g. dev or holdout)")
+    p.set_defaults(func=evaluate_command)
     p = commands.add_parser("sample-labels", help="Create private annotation frames and an unlabeled template")
     p.add_argument("video")
     p.add_argument("--out", required=True)
@@ -118,8 +130,17 @@ def main():
     p.add_argument("--start-seconds", type=float, default=0.)
     p.add_argument("--duration", type=float)
     p.set_defaults(func=sample_labels)
+    p = commands.add_parser("annotation-set", help="Split-aware frames, grid sheets and a v2 label template")
+    p.add_argument("video")
+    p.add_argument("--out", required=True)
+    p.add_argument("--intervals", required=True, help="Comma-separated start:end seconds, e.g. 0:12,20:30")
+    p.add_argument("--split", choices=["dev", "holdout"], required=True)
+    p.add_argument("--step-frames", type=int, default=15)
+    p.set_defaults(func=lambda a: print(len(make_annotation_set(
+        Path(a.video), Path(a.out), probe(Path(a.video))["timestamps"],
+        parse_intervals(a.intervals), a.step_frames, a.split)["frames"]), "frames"))
     args = parser.parse_args()
-    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "wrist_threshold", "pck_threshold"]:
+    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "wrist_threshold", "pck_threshold"]:
         if hasattr(args, name) and getattr(args, name) is not None and getattr(args, name) <= 0:
             parser.error(f"{name.replace('_', '-')} must be positive")
     if getattr(args, "start_seconds", 0) < 0:

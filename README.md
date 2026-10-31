@@ -6,6 +6,8 @@ See [the measured milestone report](docs/MILESTONE_REPORT.md) for the real-foota
 
 **Hackathon category:** PS4 — 3D Hand Motion. **Current status:** functioning MediaPipe skeleton baseline, tested on a 30-second interval from one supplied factory clip. Mesh reconstruction and calibrated world-space tracking remain pending. The [submission guide](docs/SUBMISSION.md) contains a concise project summary, measured results and the remaining deliverables.
 
+**Continue development:** use the detailed [continuation prompt](docs/AGENT_CONTINUATION_PROMPT.md) together with the supplied 27-page research PDF. The [reference-artifact guide](docs/REFERENCE_ARTIFACTS.md) explains the private release containing the original downloaded video, all three processed benchmark demos, cached estimates, interactive recordings, annotation templates, checksums and the unchanged PDF. Repository access is required; only one of the 40 original clips has been downloaded or benchmarked.
+
 ## Quick start
 
 Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, ordinary laptop CPU. Python 3.14 is intentionally excluded. Setup with [uv](https://docs.astral.sh/uv/):
@@ -116,7 +118,7 @@ Detection matching uses raw observed wrists within 0.10 of the image diagonal (c
 
 ## Privacy and submission
 
-`data/`, `runs/`, `models/`, videos, Rerun recordings and NPZ exports are ignored. All derived outputs can reveal private task motion and must stay private along with source footage. Do not force-add them. This repository contains source, configuration, tests and documentation; use the designated private submission folder for processed clips and motion exports. Model assets are downloaded separately from the official source. Confirm repository access requirements with the organizers before submitting its link.
+`data/`, `runs/`, `models/`, videos, Rerun recordings and NPZ exports are ignored in ordinary source commits. All derived outputs can reveal private task motion and must stay private along with source footage. At the user's request, a restricted reference set is attached to a private repository release for authorized continuation; see [access and restoration](docs/REFERENCE_ARTIFACTS.md). Keep this repository private while those assets are attached. Use the designated private submission folder for the official processed-clip submission, and prepare a separate source-only repository if public access is required. Model assets are downloaded separately from the official source.
 
 ## Repository structure
 

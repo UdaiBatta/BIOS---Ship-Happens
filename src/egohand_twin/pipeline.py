@@ -114,7 +114,9 @@ def process(args):
     if not cap.isOpened():
         raise ValueError("OpenCV could not decode video")
     detector = video_sink = rerun_sink = None
-    tracker = IdentityTracker(args.predict_seconds, args.retain_seconds, not args.no_smoothing)
+    tracker = IdentityTracker(args.predict_seconds, args.retain_seconds, not args.no_smoothing,
+                              (int(info["width"]), int(info["height"]))
+                              if getattr(args, "tracker_units", "normalized") == "diagonal" else None)
     rss = psutil.Process()
     peak_rss = rss.memory_info().rss
     latency, sample_rows, events = [], [], []

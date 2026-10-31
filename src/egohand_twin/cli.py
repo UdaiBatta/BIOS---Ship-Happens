@@ -107,6 +107,8 @@ def main():
     p.add_argument("--timestamp-source", choices=["auto", "frames"], default="auto",
                    help="auto: verified packet PTS (fast); frames: decode every frame with FFprobe")
     p.add_argument("--no-smoothing", action="store_true")
+    p.add_argument("--tracker-units", choices=["normalized", "diagonal"], default="normalized",
+                   help="Association distance units; diagonal is aspect-ratio correct")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
     p.add_argument("--detection-threshold", type=float, default=.5)

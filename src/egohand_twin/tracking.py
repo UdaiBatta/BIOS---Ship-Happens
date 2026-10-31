@@ -76,9 +76,14 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
 
 class IdentityTracker:
     """Short-term associations, not biometric or guaranteed anatomical identities."""
-    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True):
+    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None):
+        """``frame_size=(width, height)`` measures association distances in image-diagonal
+        units (isotropic in pixels). ``None`` keeps the original normalized x/y units,
+        in which a vertical pixel counts ~1.8x a horizontal pixel on 16:9 video."""
         if predict_s < 0 or retain_s < predict_s:
             raise ValueError("Require 0 <= predict_s <= retain_s")
+        self.units = (np.array(frame_size, dtype=float)/np.hypot(*frame_size)
+                      if frame_size is not None else np.ones(2))
         self.predict_s, self.retain_s = predict_s, retain_s
         self.smoothing = smoothing
         self.tracks: dict[int, Track] = {}
@@ -90,7 +95,7 @@ class IdentityTracker:
     def _cost(self, t: Track, d: Detection, time):
         age = time - t.last_seen
         predicted = t.detection.image[0, :2] + t.velocity * min(age, .2)
-        distance = np.linalg.norm(d.image[0, :2] - predicted)
+        distance = np.linalg.norm((d.image[0, :2] - predicted) * self.units)
         # Finite spatial gate prevents distant re-entries inheriting a stale ID.
         if distance > min(.32, .10 + age * .55):
             return 1e6
@@ -123,7 +128,7 @@ class IdentityTracker:
                 t, d = active[row], detections[col]
                 dt = time - t.last_seen
                 velocity = (d.image[0, :2] - t.detection.image[0, :2]) / dt
-                speed = np.linalg.norm(velocity)
+                speed = np.linalg.norm(velocity * self.units)
                 if speed > 2.:
                     velocity *= 2. / speed
                 t.velocity = .5 * velocity + .5 * t.velocity

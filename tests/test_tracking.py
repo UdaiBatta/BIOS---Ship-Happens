@@ -95,3 +95,14 @@ def test_crop_coordinates_and_depth_return_to_source_frame():
     np.testing.assert_array_equal(mapped.world, d.world)
     np.testing.assert_array_equal(d.image, original)
     assert mapped.origin == "center_crop_rescue"
+
+
+def test_diagonal_units_treat_pixels_isotropically():
+    def ids(tracker, dx, dy):
+        tracker.update([detection(.5, .5)], 0.)
+        return [h["track_id"] for h in tracker.update([detection(.5+dx, .5+dy)], 1/30) if h["observed"]]
+    # 162 px vertical move on 1920x1080: legacy normalized units over-penalise it.
+    assert ids(IdentityTracker(), 0., .15) == [2]
+    assert ids(IdentityTracker(frame_size=(1920, 1080)), 0., .15) == [1]
+    # 288 px horizontal move is rejected in both unit systems.
+    assert ids(IdentityTracker(frame_size=(1920, 1080)), .15, 0.) == [2]

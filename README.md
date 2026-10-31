@@ -27,6 +27,8 @@ uv run egohand doctor
 uv run egohand fetch-model
 ```
 
+On Linux, MediaPipe also needs the system GL/EGL libraries (Debian/Ubuntu: `sudo apt-get install libgles2 libegl1`). Disable Rerun's usage analytics once per machine with `uv run rerun analytics disable`. The web viewer otherwise tries to reach rerun.io for telemetry; no footage is involved, but offline use should not depend on it.
+
 On macOS, install FFmpeg with `brew install ffmpeg`. On Windows, install FFmpeg and put both executables on PATH. Download authorized factory clips to `data/private/` locally.
 
 ```sh
@@ -70,6 +72,19 @@ uv run egohand quality runs/clip_v2 $V                                          
 uv run egohand replay $V runs/clip_v2 --out runs/clip_v2/review.rrd --quality runs/clip_v2/quality
 uv run egohand export-segments runs/clip_v2 --out runs/clip_v2_suitable --status suitable
 ```
+
+Teach-back helpers for expert knowledge capture:
+
+```sh
+uv run egohand compare $V runs/clip_v2 --time 6.0 --out runs/clip_v2/why3d_6s.png   # same moment: flat frame vs 3D hand, 3 views
+uv run egohand steps-init runs/clip_v2 --out runs/clip_v2/steps.json                 # empty sidecar bound to source + run
+uv run egohand steps-check runs/clip_v2 runs/clip_v2/steps.json
+uv run egohand replay $V runs/clip_v2 --out runs/clip_v2/teach.rrd --steps runs/clip_v2/steps.json --quality runs/clip_v2/quality
+```
+
+- `compare` refuses frames without an observed hand and names the nearest observed frames. Its 3D panel shows MediaPipe's hand-relative estimate; joints hidden in the image are model-inferred.
+- `steps.json` holds `{start_s, end_s, label, version, note, reviewer, signed_off}` on the run's time base. It is validated against the source hash and run id, and `signed_off` requires a reviewer.
+- Steps are human-authored markers, not detections. Do not put worker names or scores in them.
 
 The default detector settings are unchanged, so historical runs reproduce. Further experimental options:
 - `--rescue guided,center,tiles` with `--max-crops` and `--crop-max-side` for full-resolution crops.
@@ -173,6 +188,8 @@ src/egohand_twin/
   identity.py     Offline whole-track left/right vote (unknown allowed)
   quality.py      Quality signals, windows, review queue, segment export
   lift.py         EXPERIMENTAL camera-space PnP under an assumed lens
+  compare.py      Same-moment flat video vs 3D views (teach-back / demo)
+  steps.py        steps.json sidecar: human step markers with sign-off
 tests/            Tracking, detection crops, evaluation, quality and lift checks
 docs/             Measured results, submission guide and remaining milestones
 pyproject.toml    Package, command entry point and dependencies

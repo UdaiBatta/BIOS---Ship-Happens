@@ -1,5 +1,7 @@
 # Five-minute demo, slide outline and judges' Q&A
 
+**Second user story: expert knowledge capture.** "Half the shop lives in one person's head." Record an expert once, then let others replay the hand motion, add step markers and notes, and look at the same moment from three 3D viewpoints (`egohand compare`, `--steps`). EgoHand Twin *complements* setup sheets, ERP and cross-training; it does not replace them. Whether the 3D view helps people describe a hand action better than plain video is **not yet measured** (test below).
+
 **User story:** a data engineer preparing factory demonstrations for hand-motion analysis or robotics research needs to know which intervals hold usable hand motion, where reconstruction failed, and what to inspect first, with every result traceable to source frames.
 
 **Before presenting:**
@@ -15,6 +17,7 @@
 | 0:30–1:15 | Rerun: video + hand-relative 3D, pause at about 6 s and orbit | "21 landmarks per hand and hand-relative 3D in meters. Spacing between hands in the 3D panel is for display only." |
 | 1:15–2:00 | Same seconds: B0 vs chosen detector | "Out of the box, MediaPipe found about a quarter of labeled visible hands. Lower thresholds plus a center crop found half on a held-out interval, with 39 of 40 detections correct. The labels are provisional." |
 | 2:00–3:00 | Quality time series + review-queue log; jump to the top item (12–17 s) | "Each one-second window says *suitable*, *needs review* or *insufficient evidence*, with the reasons. The top item, 12–17 s, has hands observed in only 30–47% of frames per window, missing-track gaps of 0.53–0.73 s, side changes in three windows and fast camera motion (44% of frame width per second) at 16 s. These values come from the chosen-configuration run in `runs/timing/T03_R1_legacy_1`. Insufficient evidence means *no observed hand*, not *no hand*." |
+| 2:45–3:00 | `egohand compare` image at 6 s: flat frame vs front/side/top 3D views of each hand | "Same instant, flat video vs 3D. The side view shows how flat the hand on the slab is. Hidden joints are the model's estimate, and this frame also shows a side error: the hand on the slab is labeled Right with p=0.57." |
 | 3:00–3:30 | A predicted/lost interval | "Predictions are short, 2D only and grey; lost tracks have no coordinates. None of it counts as a detection." |
 | 3:30–4:10 | `review_queue.csv`, `export-segments --status suitable`, segment manifest | "The engineer exports only suitable intervals. Every record keeps raw values, states, source hash, run id and frame range." |
 | 4:10–4:40 | Results table (holdout) + one unresolved failure (hands gripping the slab edge at the bottom: 7/23 recovered) | "This is what we measured, with denominators. This failure remains." |
@@ -104,6 +107,20 @@ Each answer has: a short answer (20–30 s), its **evidence**, a longer technica
 - Side errors on recovered hands, and track fragmentation.
 - Labels not yet human-reviewed; no other recording family; unknown lens.
 - *Next experiments:* review the labels; process one clip from each other family; a calibrated own-recording depth test; try a dedicated hand detector for edge and grip cases.
+
+## "Does 3D beat video?" user test (protocol; not yet run)
+
+- **People:** 3–5 participants who did not build the tool.
+- **Tasks:**
+  - (a) "Find the moment the cloth hand reaches the far edge."
+  - (b) "Describe how the hand on the slab is posed: flat or curled, fingers spread or together."
+- **Conditions:** plain video, vs video + 3D replay + `compare` image, counterbalanced across two clip intervals.
+- **Record:** time; correctness against answers agreed by two reviewers beforehand; confidence.
+- **Report:** results per task, with n. If 3D does not beat video on (b), say so and present the steps sidecar and review queue as the value instead.
+
+**Q16. Does 3D show anything video can't?**
+- *Short:* untested. The 3D view gives other viewpoints of the same instant, but hidden joints are the model's estimate, not an observation. We built the comparison and a test protocol; we have no measured result.
+- *Fallback:* the steps sidecar and review queue stand on their own.
 
 ## Review-time pilot (protocol; not yet run)
 

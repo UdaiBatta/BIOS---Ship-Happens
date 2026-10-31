@@ -127,7 +127,8 @@ class VideoSink:
 
 
 class RerunSink:
-    def __init__(self, path: Path, lift: dict | None = None, quality: dict | None = None):
+    def __init__(self, path: Path, lift: dict | None = None, quality: dict | None = None,
+                 steps: list | None = None):
         """``lift`` optionally maps (frame_index, track_id) -> 21x3 camera-space joints from
         ``egohand lift``; it is shown in its own EXPERIMENTAL view, never mixed with the
         hand-relative view."""
@@ -154,12 +155,25 @@ class RerunSink:
         if quality is not None:
             bottom = [rrb.TimeSeriesView(origin="quality/signals", name="Quality signals (heuristic)"),
                       rrb.TextLogView(origin="quality/queue", name="Review queue"), *bottom]
+        if steps is not None:
+            bottom = [rrb.TextLogView(origin="steps", name="Steps (human-authored)"), *bottom]
         rr.send_blueprint(rrb.Blueprint(rrb.Vertical(
             rrb.Horizontal(*views),
             rrb.Horizontal(*bottom),
             row_shares=[3, 2] if quality is not None else [4, 1]),
             rrb.TimePanel(timeline="video_time"), collapse_panels=True))
         rr.log("hands", rr.ViewCoordinates.RDF, static=True)
+        for i, step in enumerate(steps or [], 1):
+            # Human-authored markers on the same time base as the video (timestamp_s).
+            status = f"signed off by {step['reviewer']}" if step["signed_off"] else "NOT signed off"
+            rr.set_time("video_time", duration=step["start_s"])
+            rr.log("steps", rr.TextLog(
+                f"STEP {i} start: {step['label']} (v{step['version']}, {status})"
+                + (f" - {step['note']}" if step["note"] else ""), level="INFO"))
+            rr.log("steps/active_step", rr.Scalars(i))
+            rr.set_time("video_time", duration=step["end_s"])
+            rr.log("steps", rr.TextLog(f"STEP {i} end: {step['label']}", level="DEBUG"))
+            rr.log("steps/active_step", rr.Scalars(0))
         if lift is not None:
             rr.log("camera_space", rr.ViewCoordinates.RDF, static=True)
             # Simple frustum glyph at the camera origin (x right, y down, z forward).
@@ -257,7 +271,7 @@ def load_quality(directory: Path) -> dict:
 
 
 def rebuild_replay(video: Path, run: Path, output: Path, lift: Path | None = None,
-                   quality: Path | None = None):
+                   quality: Path | None = None, steps: Path | None = None):
     """Re-render cached observations without running or changing the detector."""
     if not (run/"COMPLETE").exists():
         raise ValueError("Run is incomplete")
@@ -268,7 +282,9 @@ def rebuild_replay(video: Path, run: Path, output: Path, lift: Path | None = Non
         raise ValueError("Source video does not match the cached run")
     output.parent.mkdir(parents=True, exist_ok=True)
     cap = cv2.VideoCapture(str(video))
-    sink = RerunSink(output, load_lift(lift) if lift else None, load_quality(quality) if quality else None)
+    from .steps import load_steps
+    sink = RerunSink(output, load_lift(lift) if lift else None, load_quality(quality) if quality else None,
+                     load_steps(steps, run) if steps else None)
     count = 0
     try:
         frame_index = -1

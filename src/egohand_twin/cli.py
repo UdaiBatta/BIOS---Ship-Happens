@@ -16,6 +16,8 @@ from .annotate import make_annotation_set, parse_intervals
 from .evaluation import evaluate
 from .identity import write_identity
 from .lift import hand_relative_variation, lift_run
+from .compare import compare
+from .steps import load_steps, write_template
 from .quality import QualityConfig, assess, evaluate_quality, export_segments, write_quality
 from .model import fetch_model, sha256
 from .pipeline import probe, process
@@ -139,9 +141,11 @@ def main():
     p.add_argument("--out", required=True, help="New .rrd output filename")
     p.add_argument("--lift", help="Optional lift_*.npz from 'egohand lift' for an experimental camera-space view")
     p.add_argument("--quality", help="Optional quality directory from 'egohand quality' for the review timeline")
+    p.add_argument("--steps", help="Optional steps.json sidecar (human-authored step markers)")
     p.set_defaults(func=lambda a: rebuild_replay(Path(a.video), Path(a.run), Path(a.out),
                                                  Path(a.lift) if a.lift else None,
-                                                 Path(a.quality) if a.quality else None))
+                                                 Path(a.quality) if a.quality else None,
+                                                 Path(a.steps) if a.steps else None))
     p = commands.add_parser("evaluate", help="Score observed detections against manual labels")
     p.add_argument("run")
     p.add_argument("labels")
@@ -178,6 +182,23 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--status", choices=["suitable", "needs_review", "insufficient_evidence"], default="suitable")
     p.set_defaults(func=lambda a: print(json.dumps(export_segments(Path(a.run), Path(a.out), a.status), indent=2)))
+    p = commands.add_parser("compare", help="Same-moment image: flat frame + 2D overlay vs 3D hand from three views")
+    p.add_argument("video")
+    p.add_argument("run")
+    p.add_argument("--out", required=True, help="New .png path (private: contains footage)")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--frame", type=int)
+    group.add_argument("--time", type=float, help="Seconds on the run time base (nearest processed frame)")
+    p.set_defaults(func=lambda a: print(json.dumps(compare(Path(a.video), Path(a.run), Path(a.out),
+                                                           a.frame, a.time), indent=2)))
+    p = commands.add_parser("steps-init", help="Write an empty steps.json sidecar bound to a run")
+    p.add_argument("run")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=lambda a: print(write_template(Path(a.run), Path(a.out))))
+    p = commands.add_parser("steps-check", help="Validate a steps.json sidecar against its run")
+    p.add_argument("run")
+    p.add_argument("steps")
+    p.set_defaults(func=lambda a: print(json.dumps(load_steps(Path(a.steps), Path(a.run)), indent=2)))
     p = commands.add_parser("sample-labels", help="Create private annotation frames and an unlabeled template")
     p.add_argument("video")
     p.add_argument("--out", required=True)

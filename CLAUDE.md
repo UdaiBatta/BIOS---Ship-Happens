@@ -2,7 +2,7 @@
 
 Source: "Winning the Egocentric Vision Hackathon: Strategy Report" (Phase 1 research, 31 Oct 2026).
 Event: Ship Happens · Egocentric Vision: Factory Video to Useful Data. 24-hour build.
-Status as of 31 Oct 2026: research and planning only. No code yet. The footage has not been seen.
+Status as of 31 Oct 2026: research done. The compliance setup for the repo is in place. No pipeline code yet. The footage has not been seen.
 
 ## The decision
 
@@ -108,6 +108,7 @@ Scope:
 - **Cut:** HaWoR/SLAM 3D, 3D meshes, natural-language search, safety alerts, training any model, per-worker metrics, React.
 
 ## Compliance: breaking these can mean disqualification
+**Implemented (done):** `.gitignore`, `.githooks/pre-commit` (enable with `git config core.hooksPath .githooks`), and `scripts/check_history.sh` (run before going public). Images are allowed only in `docs/synthetic/`.
 - Git-ignore all video and image types (mp4 mov avi mkv webm m4v mpg jpg jpeg png), npy/npz/pkl/jsonl, `data/ outputs/ frames/ labels/`, and model files (.task .pth .ckpt).
   The only images allowed are ones we made from our own footage, in `docs/synthetic/`.
 - Pre-commit hook rejects any image or video outside `docs/synthetic/` and any file over 2 MB.

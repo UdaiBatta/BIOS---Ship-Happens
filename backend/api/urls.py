@@ -22,6 +22,7 @@ urlpatterns = [
     path("runs/<uuid:run_id>/review-queue/<str:item_id>/decisions", views.review_decision),
     path("runs/<uuid:run_id>/review-stats", views.review_stats),
     path("runs/<uuid:run_id>/preview.mp4", views.run_preview),
-    path("runs/<uuid:run_id>/compare.png", views.run_compare),
+    path("runs/<uuid:run_id>/proxy.mp4", views.run_proxy),
+    path("runs/<uuid:run_id>/compare.jpg", views.run_compare),
     path("runs/<uuid:run_id>/artifacts/<path:name>", views.run_artifact),
 ]

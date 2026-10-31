@@ -190,7 +190,8 @@ def runs(request):
         raise ApiError("start_s outside the video")
     if duration is not None and duration <= 0:
         raise ApiError("duration_s must be positive")
-    workers = int(data.get("workers", 1))
+    # 2 detection processes measured identical to sequential and ~20% faster on a 4-vCPU host.
+    workers = int(data.get("workers", 2 if (os.cpu_count() or 1) >= 4 else 1))
     if not 1 <= workers <= (os.cpu_count() or 1):
         raise ApiError(f"workers must be between 1 and {os.cpu_count()}")
     run = Run.objects.create(video=video, preset=preset, start_s=start, duration_s=duration, workers=workers,
@@ -369,6 +370,18 @@ def run_preview(request, run_id):
 
 
 @api(("GET",))
+def run_proxy(request, run_id):
+    """Clean H.264 video of the run interval (960 px). Proxy time t = run time start_s + t."""
+    directory = run_dir(Run.objects.get(pk=run_id))
+    path = directory/"proxy.mp4"
+    if not path.exists():
+        raise services.NotReady("proxy.mp4")
+    response = ranged_file(path, request, "video/mp4")
+    response["Cache-Control"] = "private, max-age=86400"
+    return response
+
+
+@api(("GET",))
 def run_artifact(request, run_id, name: str):
     """Download whitelisted run files (exports) for analysis."""
     allowed = {"landmarks.jsonl", "landmarks.csv", "landmarks.npz", "manifest.json", "metrics.json",
@@ -396,9 +409,13 @@ def run_compare(request, run_id):
         record = find_frame(directory, time_s=t)
     except ValueError as error:
         raise ApiError(str(error), 404)
-    out = directory/"compare"/f"frame_{record['frame_index']:06d}.png"
+    png = directory/"compare"/f"frame_{record['frame_index']:06d}.png"
+    out = png.with_suffix(".jpg")
     if not out.exists():
-        compare(Path(run.video.path), directory, out, frame_index=record["frame_index"])
-    response = FileResponse(out.open("rb"), content_type="image/png")
+        if not png.exists():
+            compare(Path(run.video.path), directory, png, frame_index=record["frame_index"])
+        import cv2
+        cv2.imwrite(str(out), cv2.imread(str(png)), [cv2.IMWRITE_JPEG_QUALITY, 88])  # ~10x smaller than PNG
+    response = FileResponse(out.open("rb"), content_type="image/jpeg")
     response["Cache-Control"] = "private, max-age=86400"
     return response

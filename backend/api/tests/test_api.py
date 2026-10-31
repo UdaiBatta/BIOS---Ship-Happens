@@ -32,8 +32,12 @@ def fake_process(args, progress=None, workers=1):
     out = Path(args.out)
     out.mkdir(parents=True)
     lines, events = [], []
+    start = args.start_seconds
+    end = start + args.duration if args.duration else N/FPS
     for i in range(N):
         t = i/FPS
+        if not start - 1e-9 <= t < end - 1e-9:
+            continue
         hands = []
         flicker = 10 <= i < 20 and i % 2  # 1-2 s: detected only every other frame
         if (i < 20 or i >= 30) and not flicker:  # observed, missing for 1 s, then a new track
@@ -195,6 +199,30 @@ class ApiTests(TestCase):
             image = cv2.imdecode(np.frombuffer(b"".join(response.streaming_content), np.uint8), cv2.IMREAD_GRAYSCALE)
             self.assertLess(abs(float(image.mean()) - 6*index), 4, f"frame {index}")
         self.assertEqual(self.client.get(f"/api/videos/{video['id']}/frames/40.jpg").status_code, 404)
+
+    def test_proxy_is_frame_exact_for_offset_runs(self):
+        video = self.post("/api/videos", {"path": str(self.video_path)}).json()
+        run_id = self.post("/api/runs", {"video_id": video["id"], "start_s": 1.0, "duration_s": 2.0}).json()["id"]
+        run = jobs.run_one(jobs.claim_next(), process=fake_process)
+        self.assertEqual(run.status, "complete", run.error)
+        proxy = json.loads((Path(run.out_dir)/"proxy.json").read_text())
+        self.assertEqual((proxy["frames"], proxy["time_offset_s"]), (20, 1.0))
+        response = self.client.get(f"/api/runs/{run_id}/proxy.mp4", HTTP_RANGE="bytes=0-99")
+        self.assertEqual(response.status_code, 206)
+        cap = cv2.VideoCapture(str(Path(run.out_dir)/"proxy.mp4"))
+        means = []
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            means.append(float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()))
+        cap.release()
+        expected = [6*i for i in range(10, 30)]  # source frames 10..29
+        self.assertEqual(len(means), 20)
+        self.assertLess(max(abs(m - e) for m, e in zip(means, expected)), 4)
+        image = self.client.get(f"/api/runs/{run_id}/compare.jpg?t=1.0")
+        self.assertEqual((image.status_code, image["Content-Type"]), (200, "image/jpeg"))
+        self.assertEqual(self.client.get(f"/api/runs/{run_id}/compare.jpg?t=2.5").status_code, 404)  # no hand
 
     def test_failed_job_records_error(self):
         video = self.post("/api/videos", {"path": str(self.video_path)}).json()

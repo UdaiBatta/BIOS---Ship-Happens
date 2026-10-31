@@ -24,7 +24,8 @@ from .governance import retention_report, template as governance_template
 from .steps import load_steps, write_template
 from .quality import assess, evaluate_quality, export_segments, write_quality
 from .model import fetch_model, sha256
-from .pipeline import probe, process
+from .parallel import process_parallel
+from .pipeline import probe
 from .render import fit_image, text, rebuild_replay
 
 
@@ -196,7 +197,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tracking-threshold", type=float)
     p.add_argument("--no-video", action="store_true")
     p.add_argument("--rrd", action="store_true", help="Write synchronized Rerun recording")
-    p.set_defaults(func=process)
+    p.add_argument("--workers", type=int, default=1,
+                   help="Detection processes (parallel chunked detection; 1 = sequential)")
+    p.set_defaults(func=lambda a: process_parallel(a, workers=a.workers))
     p = commands.add_parser("replay", help="Rebuild Rerun replay from cached landmarks without inference")
     p.add_argument("video")
     p.add_argument("run")
@@ -330,7 +333,7 @@ def main():
     args = parser.parse_args()
     if getattr(args, "command", None) == "process":
         apply_preset(args)
-    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "max_crops", "crop_max_side", "wrist_threshold", "pck_threshold"]:
+    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "workers", "max_crops", "crop_max_side", "wrist_threshold", "pck_threshold"]:
         if hasattr(args, name) and getattr(args, name) is not None and getattr(args, name) <= 0:
             parser.error(f"{name.replace('_', '-')} must be positive")
     if getattr(args, "start_seconds", 0) < 0:

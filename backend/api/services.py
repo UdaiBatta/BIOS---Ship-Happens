@@ -237,3 +237,26 @@ def video_timestamps(video) -> np.ndarray:
         np.save(path, value)
     cache.set(key, value, timeout=None)
     return value
+
+
+def build_proxy(video_path: Path, out: Path, start_s: float, duration_s: float | None, width: int = 960) -> dict:
+    """H.264 playback proxy of the run interval for browser <video> playback.
+
+    Frame-exact by construction: FFmpeg accurate seek to ``start_s`` and passthrough of
+    source timestamps (no frame dropping/duplication), keyframe every 15 frames for fast
+    seeking, faststart. Proxy time t corresponds to run time ``start_s + t``. The proxy is
+    a derived copy of restricted footage and stays in the private run folder.
+    """
+    tmp = out.with_suffix(".tmp.mp4")
+    cmd = ["ffmpeg", "-v", "error", "-y", "-ss", f"{start_s:.6f}", "-i", str(video_path)]
+    if duration_s:
+        cmd += ["-t", f"{duration_s:.6f}"]
+    cmd += ["-an", "-vf", f"scale={width}:-2", "-fps_mode", "passthrough", "-c:v", "libx264",
+            "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            str(tmp)]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=3600)
+    tmp.replace(out)
+    count = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+                            "stream=nb_read_packets", "-of", "csv=p=0", str(out)],
+                           check=True, capture_output=True, text=True).stdout.strip()
+    return {"path": out.name, "width": width, "frames": int(count), "time_offset_s": start_s}

@@ -95,14 +95,29 @@ def probe(path: Path, timestamp_source: str = "auto", check_frames: int = 48):
             "timestamp_source": source, "timestamp_note": note}
 
 
-def process(args, progress=None):
+def build_detector(args):
+    """Construct the detector exactly as configured by process options (shared with parallel.py)."""
+    options = dict(detection=args.detection_threshold, presence=args.presence_threshold,
+                   tracking=args.tracking_threshold, mode=args.detector_mode, num_hands=args.num_hands)
+    rescue = [s for s in (getattr(args, "rescue", None) or "").split(",") if s]
+    if args.rescue_crop and rescue:
+        raise ValueError("Use either --rescue-crop (historical) or --rescue, not both")
+    if args.rescue_crop:
+        return CropRescueDetector(Path(args.model), **options)
+    if rescue:
+        return MultiViewDetector(Path(args.model), strategies=rescue, max_crops=args.max_crops,
+                                 dedupe=args.dedupe, crop_max_side=getattr(args, "crop_max_side", None), **options)
+    return Detector(Path(args.model), **options)
+
+
+def process(args, progress=None, detector_override=None, started=None, extra_metrics=None):
     """Process one video interval into a run directory.
 
     ``progress``, if given, is called as ``progress(processed_frames, expected_frames)``
     about once per second of source video (expected is an estimate from timestamps,
     stride and limits) so a job runner can report status without parsing stdout.
     """
-    started = time.perf_counter()
+    started = time.perf_counter() if started is None else started
     source, out = Path(args.video), Path(args.out)
     if not source.is_file():
         raise FileNotFoundError(source)
@@ -138,19 +153,7 @@ def process(args, progress=None):
     best_poster_hands = -1
     try:
         mark = time.perf_counter()
-        options = dict(detection=args.detection_threshold, presence=args.presence_threshold,
-                       tracking=args.tracking_threshold, mode=args.detector_mode, num_hands=args.num_hands)
-        rescue = [s for s in (getattr(args, "rescue", None) or "").split(",") if s]
-        if args.rescue_crop and rescue:
-            raise ValueError("Use either --rescue-crop (historical) or --rescue, not both")
-        if args.rescue_crop:
-            detector = CropRescueDetector(Path(args.model), **options)
-        elif rescue:
-            detector = MultiViewDetector(Path(args.model), strategies=rescue,
-                                         max_crops=args.max_crops, dedupe=args.dedupe,
-                                         crop_max_side=getattr(args, "crop_max_side", None), **options)
-        else:
-            detector = Detector(Path(args.model), **options)
+        detector = detector_override if detector_override is not None else build_detector(args)
         preset = getattr(args, "preset", None)
         subtitle = ("FACTORY POV  /  MEDIAPIPE  /  " +
                     (f"PRESET {preset.upper()}" if preset else "CUSTOM SETTINGS") +
@@ -323,6 +326,7 @@ def process(args, progress=None):
             "reacquisitions": tracker.reacquisitions if args.identity == "persistent" else None,
             "first_timestamp_s": first_s, "last_timestamp_s": last_s,
             "processing_seconds": elapsed, "end_to_end_fps": processed/elapsed,
+            **(extra_metrics or {}),
             "inference_seconds": sum(latency), "inference_fps": processed/sum(latency),
             "inference_p50_ms": float(np.percentile(latency, 50)*1000),
             "inference_p95_ms": float(np.percentile(latency, 95)*1000),

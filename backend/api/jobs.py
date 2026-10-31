@@ -20,7 +20,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from .models import Run
-from .services import build_frame_index, build_tracks
+from .services import build_frame_index, build_proxy, build_tracks
 
 log = logging.getLogger(__name__)
 
@@ -79,8 +79,18 @@ def execute(run: Run, process=None) -> None:
     Run.objects.filter(pk=run.pk).update(stage="quality", progress=.9, metrics=metrics)
     summary = write_quality(out_dir, Path(run.video.path))
     Run.objects.filter(pk=run.pk).update(stage="indexing", progress=.97, quality_summary=summary)
-    build_frame_index(out_dir)
+    index_path = build_frame_index(out_dir)
     build_tracks(out_dir)
+    Run.objects.filter(pk=run.pk).update(stage="proxy", progress=.98)
+    import numpy as np
+    with np.load(index_path) as index:
+        processed = len(index["frame_index"])
+    proxy = build_proxy(Path(run.video.path), out_dir/"proxy.mp4", run.start_s, run.duration_s)
+    if proxy["frames"] != processed:
+        # Never serve a proxy whose frames do not line up with the processed frames.
+        (out_dir/"proxy.mp4").unlink(missing_ok=True)
+        raise RuntimeError(f"proxy has {proxy['frames']} frames, run has {processed}")
+    (out_dir/"proxy.json").write_text(__import__("json").dumps(proxy))
 
 
 def run_one(run: Run, process=None) -> Run:

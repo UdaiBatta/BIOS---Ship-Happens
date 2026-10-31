@@ -13,6 +13,8 @@ uv run python manage.py runserver 127.0.0.1:8000           # API
 uv run python manage.py egohand_worker --recover           # job worker (second terminal)
 ```
 
+Then open **http://127.0.0.1:8000/** for the viewer (`frontend/prototype/index.html`, served by Django with `backend-connector.js`). Choose a completed run and click **Load run**, or queue a new one with **Process**.
+
 Environment variables (all optional):
 
 | Variable | Default | Meaning |
@@ -24,6 +26,8 @@ Environment variables (all optional):
 | `EGOHAND_DATA_DIR` | `<repo>/data/private/backend` | Database, frame-image cache, timestamp cache |
 | `EGOHAND_GOVERNANCE_FILE` | empty | `governance.json` passed to every run (consent, retention, lens source) |
 | `EGOHAND_MAX_FRAMES_PER_REQUEST` | 600 | Upper limit for `/frames` pages |
+| `EGOHAND_LIFT_HFOV` | 150 | Horizontal FOV for the EXPERIMENTAL assumed-lens lift the worker writes for the viewer's camera-space panel; empty disables it |
+| `EGOHAND_FRONTEND_DIR` | `<repo>/frontend/prototype` | Folder of the viewer page served at `/` |
 
 ## Conventions
 
@@ -109,7 +113,7 @@ Quality statuses are **heuristic, task-specific** assessments. `insufficient_evi
 | `GET /api/runs/<id>/preview.mp4` | Side-by-side rendered preview (only if the run was submitted with `render_preview: true`) |
 | `GET /api/runs/<id>/compare.jpg?t=6.0` | Same-moment flat frame vs three 3D views of each observed hand. 404 with the nearest observed frames if that moment has no observed hand. About 1.6 s cold, then cached. |
 | `GET /api/runs/<id>/manifest` | `manifest.json`: hashes, parameters including the preset, governance, lens provenance |
-| `GET /api/runs/<id>/artifacts/<name>` | Download one of: `landmarks.jsonl`, `landmarks.csv`, `landmarks.npz`, `manifest.json`, `metrics.json`, `tracking_events.csv`, `replay.rrd`, `quality/review_queue.csv`, `quality/quality_frames.csv` |
+| `GET /api/runs/<id>/artifacts/<name>` | Download one of: `landmarks.jsonl`, `landmarks.csv`, `landmarks.npz`, `manifest.json`, `metrics.json`, `tracking_events.csv`, `replay.rrd`, `quality/review_queue.csv`, `quality/quality_frames.csv`, `identity.json`, `lift_hfov<NNN>.json`, `lift_hfov<NNN>.npz` |
 
 ## Measured latency (4-vCPU Linux VM, 31 Oct 2026)
 

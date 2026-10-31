@@ -651,7 +651,7 @@ function inData(t) { return S.frames.length > 0 && t >= S.tStart - 1e-6 && t <= 
 function seek(t) {
   S.t = clamp(t, S.tStart, Math.max(S.tStart, S.tEnd - 1e-3));
   S.idx = indexAt(S.t);
-  if (S.video) { S.t = frameMid(S.idx); if (Math.abs(S.video.currentTime - S.t) > 1e-4) S.video.currentTime = S.t; }
+  if (S.video) { S.t = frameMid(S.idx); const vt = S.t - (S.videoOffset || 0); if (Math.abs(S.video.currentTime - vt) > 1e-4) S.video.currentTime = vt; }
   S.dirty = true;
 }
 function stepFrame(d) {
@@ -661,7 +661,7 @@ function stepFrame(d) {
   seek(frameMid(clamp(cur + d, 0, S.times.length - 1)));
 }
 // Paused with a video: show the frame (and skeleton) the video actually displays.
-function snapToVideo() { if (S.video && !S.playing) { S.t = S.video.currentTime; S.idx = indexAt(S.t); S.dirty = true; } }
+function snapToVideo() { if (S.video && !S.playing) { S.t = S.video.currentTime + (S.videoOffset || 0); S.idx = indexAt(S.t); S.dirty = true; } }
 function setPlaying(p) {
   S.playing = p; $('btnPlay').textContent = p ? '❚❚ Pause' : '▶ Play';
   if (S.video) { if (p) S.video.play().catch(() => {}); else { S.video.pause(); snapToVideo(); } }
@@ -1421,7 +1421,7 @@ function updateVideoBadge() {
 $('fileVideo').addEventListener('change', (ev) => {
   const file = ev.target.files[0]; if (!file) return;
   const v = $('video'); if (v.src) URL.revokeObjectURL(v.src);
-  v.src = URL.createObjectURL(file); S.video = v;
+  v.src = URL.createObjectURL(file); S.video = v; S.videoOffset = 0;
   v.addEventListener('loadeddata', () => { seek(S.t); S.dirty = true; }, { once: true });
   updateVideoBadge();
   ev.target.value = '';
@@ -1468,7 +1468,7 @@ function tick(now) {
   if (S.playing) {
     if (S.video && S.video.ended) setPlaying(false);
     else {
-      if (S.video && !S.video.paused) S.t = S.video.currentTime;
+      if (S.video && !S.video.paused) S.t = S.video.currentTime + (S.videoOffset || 0);   // videoOffset: video starts at run time videoOffset (backend proxy); 0 for local files
       else S.t += ((now - S.lastTick) / 1000) * S.speed;
       S.lastTick = now;
       if (S.t >= S.tEnd) { S.t = S.tEnd - 1e-3; setPlaying(false); }
@@ -1487,5 +1487,6 @@ loadFrames(makeSynthetic(), { synthetic: true, clipId: 'synthetic_demo' });
 seek(6.0);
 requestAnimationFrame(tick);
 </script>
+<script src="backend-connector.js"></script>
 </body>
 </html>

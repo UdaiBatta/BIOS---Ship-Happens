@@ -18,6 +18,16 @@
 
 Header chips: coverage is computed from the loaded file and labelled as coverage, not accuracy. The 3D-mode chip always states what the 3D is. There are no recall or FPS chips: those numbers are in the pipeline's evaluation and `metrics.json`.
 
+## Using the local backend (recommended for real runs)
+
+Start the Django backend (see `../docs/BACKEND_API.md`), then open **http://127.0.0.1:8000/**. The same page is served with a second toolbar row, *Backend*:
+
+- **Load run:** for a completed run, loads `landmarks.jsonl`, the whole-track side votes (`identity.json`) and the **experimental** assumed-lens lift (`lift_hfov150.json` + `.npz`). It uses the same loaders and checks as the file buttons below. The run's frame-exact H.264 proxy video plays in panel 1. The proxy starts at the run's `start_s`; the viewer applies that offset (`S.videoOffset`), so interval runs such as 60–70 s stay in sync.
+- **Process:** queues a run for a registered video (preset, start, length) on the local worker, shows its stage and progress, and loads it when complete.
+- **Token:** if the backend requires a token, open `http://127.0.0.1:8000/?token=…` once; it is kept for the browser session only.
+
+Opened as a file (`file://`), the page stays fully offline: `backend-connector.js` does nothing and makes no network requests.
+
 ## Using real outputs (stays on the laptop)
 
 - **Load JSONL:** schema-v1 records (see `../schema/`), the pipeline's own `runs/<run>/landmarks.jsonl` from `egohand process`, or `landmarks.identity.jsonl` from `egohand identity --write-jsonl`. A missing or `"unknown"` `anatomical_side` is treated as unavailable: the tracker's `side` (`Right`/`Left`) is used and the frame-details table says `tracker (online)`. Sides from the identity file show `whole-track vote`. Invalid lines are skipped, and the page says how many. A predicted or lost hand that carries 3D breaks the schema rule, so the page shows it as 2D only and warns you.

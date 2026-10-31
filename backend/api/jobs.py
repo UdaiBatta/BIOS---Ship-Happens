@@ -79,6 +79,13 @@ def execute(run: Run, process=None) -> None:
     Run.objects.filter(pk=run.pk).update(stage="quality", progress=.9, metrics=metrics)
     summary = write_quality(out_dir, Path(run.video.path))
     Run.objects.filter(pk=run.pk).update(stage="indexing", progress=.97, quality_summary=summary)
+    # Inputs for the viewer: whole-track side vote and the EXPERIMENTAL assumed-lens lift
+    # (its summary carries "ASSUMED (not calibrated)", which the viewer displays).
+    from egohand_twin.identity import write_identity
+    write_identity(out_dir)
+    if settings.LIFT_HFOV:
+        from egohand_twin.lift import lift_run
+        lift_run(out_dir, settings.LIFT_HFOV)
     index_path = build_frame_index(out_dir)
     build_tracks(out_dir)
     Run.objects.filter(pk=run.pk).update(stage="proxy", progress=.98)

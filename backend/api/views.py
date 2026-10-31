@@ -385,7 +385,10 @@ def run_proxy(request, run_id):
 def run_artifact(request, run_id, name: str):
     """Download whitelisted run files (exports) for analysis."""
     allowed = {"landmarks.jsonl", "landmarks.csv", "landmarks.npz", "manifest.json", "metrics.json",
-               "tracking_events.csv", "replay.rrd", "quality/review_queue.csv", "quality/quality_frames.csv"}
+               "tracking_events.csv", "replay.rrd", "quality/review_queue.csv", "quality/quality_frames.csv",
+               "identity.json"}
+    if re.fullmatch(r"lift_hfov\d{2,3}\.(npz|json)", name):
+        allowed.add(name)
     if name not in allowed:
         raise ApiError(f"artifact must be one of {sorted(allowed)}", 404)
     path = run_dir(Run.objects.get(pk=run_id))/name
@@ -418,4 +421,22 @@ def run_compare(request, run_id):
         cv2.imwrite(str(out), cv2.imread(str(png)), [cv2.IMWRITE_JPEG_QUALITY, 88])  # ~10x smaller than PNG
     response = FileResponse(out.open("rb"), content_type="image/jpeg")
     response["Cache-Control"] = "private, max-age=86400"
+    return response
+
+
+# --------------------------------------------------------------------------- viewer
+FRONTEND_FILES = {"": ("index.html", "text/html; charset=utf-8"),
+                  "backend-connector.js": ("backend-connector.js", "text/javascript; charset=utf-8")}
+
+
+def frontend(request, name: str = ""):
+    """Serve the teammate's viewer prototype (same origin as the API, so no CORS is needed)."""
+    if name not in FRONTEND_FILES:
+        return JsonResponse({"error": "not found"}, status=404)
+    filename, content_type = FRONTEND_FILES[name]
+    path = settings.FRONTEND_DIR/filename
+    if not path.exists():
+        return JsonResponse({"error": f"{filename} not found in EGOHAND_FRONTEND_DIR"}, status=404)
+    response = HttpResponse(path.read_bytes(), content_type=content_type)
+    response["Cache-Control"] = "no-cache"
     return response

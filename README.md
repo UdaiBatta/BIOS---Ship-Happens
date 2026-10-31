@@ -70,6 +70,8 @@ uv run python manage.py runserver 127.0.0.1:8000       # and, in another termina
 uv run python manage.py egohand_worker --recover
 ```
 
+Open **http://127.0.0.1:8000/**: the teammate's viewer is served with a *Backend* toolbar for loading completed runs (landmarks, side votes, experimental lift, frame-exact proxy video) or queueing new ones.
+
 ## Workflow commands
 
 | Goal | Command |

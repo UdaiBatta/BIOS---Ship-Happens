@@ -71,3 +71,9 @@ LOGGING = {"version": 1, "disable_existing_loggers": False,
            "handlers": {"console": {"class": "logging.StreamHandler"}},
            "root": {"handlers": ["console"], "level": "INFO"}}
 APPEND_SLASH = False
+
+# Experimental assumed-lens lift computed for each run so the viewer can show camera-space 3D
+# (always labelled "ASSUMED (not calibrated) · depth unvalidated"). Empty string disables it.
+_lift = os.environ.get("EGOHAND_LIFT_HFOV", "150")
+LIFT_HFOV = float(_lift) if _lift else None
+FRONTEND_DIR = Path(os.environ.get("EGOHAND_FRONTEND_DIR", REPO_DIR/"frontend"/"prototype"))

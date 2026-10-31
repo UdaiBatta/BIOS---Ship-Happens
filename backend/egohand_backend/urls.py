@@ -1,3 +1,9 @@
 from django.urls import include, path
 
-urlpatterns = [path("api/", include("api.urls"))]
+from api import views
+
+urlpatterns = [
+    path("api/", include("api.urls")),
+    path("", views.frontend),
+    path("backend-connector.js", views.frontend, {"name": "backend-connector.js"}),
+]

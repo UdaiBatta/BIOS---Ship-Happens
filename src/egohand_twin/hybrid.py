@@ -186,9 +186,9 @@ class HybridDetector:
         self.fit_3d = fit_3d
         self.max_boxes = max_boxes
         # Track gate: a recovered hand must lie near a hand this detector returned within the last
-        # ``gate_seconds`` that is not found in the current frame. Chosen on dev frames
-        # (provisional labels): RTMPose score >= 0.25 without the gate accepted 10 real hands and
-        # 11 wrong boxes (mostly skin-coloured rollers); with it, 8 real and 1 wrong.
+        # ``gate_seconds`` that is not found in the current frame (radius: the tracker's own gate).
+        # On dev frames (provisional labels), RTMPose score >= 0.25 without a gate accepted 10 real
+        # hands and 11 wrong boxes (mostly skin-coloured rollers); with a gate, 8 real and 1 wrong.
         self.gate_seconds, self.gate_diagonal = gate_seconds, gate_diagonal
         self.recent: list[tuple[float, np.ndarray]] = []           # (time, wrist pixel)
         self.stats = {"boxes": 0, "gated_out": 0, "mediapipe_in_box": 0, "rtmpose_fitted": 0,
@@ -199,12 +199,21 @@ class HybridDetector:
         detections = (self.primary.detect(rgb, timestamp_s) if isinstance(self.primary, Detector)
                       else self.primary.detect(rgb, timestamp_s, full_bgr))
         height, width = rgb.shape[:2]
-        diagonal = float(np.hypot(width, height))
+        scale = np.array([width, height], float)
         self.recent = [(t, w) for t, w in self.recent if 0 <= timestamp_s - t <= self.gate_seconds]
-        current = [d.image[0, :2]*[width, height] for d in detections]
-        # Hands seen recently but not found now: the only places where recovery is attempted.
-        missing = [w for _, w in self.recent
-                   if all(np.linalg.norm(w - c) > .1*diagonal for c in current)]
+        current = [d.image[0, :2] for d in detections]
+        # Hands seen recently but not found now (latest sighting of each), the only places where
+        # recovery is attempted. Distances are in normalised image units and the radius grows with
+        # the time since the sighting exactly like the tracker's own matching gate, so a recovered
+        # hand can always join the track it was recovered for (a wider gate created new tracks).
+        missing: list[tuple[float, np.ndarray]] = []
+        for t, w in sorted(self.recent, key=lambda e: -e[0]):
+            if all(np.linalg.norm(w - c) > .1 for c in current) and \
+                    all(np.linalg.norm(w - m) > .1 for _, m in missing):
+                missing.append((t, w))
+
+        def gate(age: float) -> float:
+            return min(.32, .10 + .55*age)                        # = IdentityTracker._cost gate
         if len(detections) < self.num_hands and missing:
             taken = [_box_of(d, width, height) for d in detections]
             for box in self.rtm.tiled_boxes(rgb)[:self.max_boxes]:
@@ -212,9 +221,9 @@ class HybridDetector:
                     break
                 if any(_overlap(box, t) > .4 for t in taken):
                     continue
-                centre = np.array([(box[0] + box[2])/2, (box[1] + box[3])/2])
-                reach = self.gate_diagonal*diagonal + .5*np.hypot(box[2] - box[0], box[3] - box[1])
-                if all(np.linalg.norm(centre - w) > reach for w in missing):
+                centre = np.array([(box[0] + box[2])/2, (box[1] + box[3])/2])/scale
+                half = .5*np.linalg.norm((np.array(box[2:4]) - box[:2])/scale)
+                if all(np.linalg.norm(centre - w) > gate(timestamp_s - t) + half for t, w in missing):
                     self.stats["gated_out"] += 1
                     continue
                 self.stats["boxes"] += 1
@@ -223,14 +232,14 @@ class HybridDetector:
                     found = self._rtmpose(rgb, box, width, height)
                 if found is None:
                     continue
-                wrist = found.image[0, :2]*[width, height]
-                if all(np.linalg.norm(wrist - w) > self.gate_diagonal*diagonal for w in missing):
+                wrist = found.image[0, :2]
+                if all(np.linalg.norm(wrist - w) > gate(timestamp_s - t) for t, w in missing):
                     self.stats["gated_out"] += 1
                     continue
                 found.index = len(detections)
                 detections.append(found)
                 taken.append(_box_of(found, width, height))
-        self.recent += [(timestamp_s, d.image[0, :2]*[width, height]) for d in detections]
+        self.recent += [(timestamp_s, d.image[0, :2].copy()) for d in detections]
         return detections
 
     def _mediapipe_in_box(self, rgb, box, width, height):

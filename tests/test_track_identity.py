@@ -51,3 +51,29 @@ def test_far_reentry_does_not_inherit_an_old_identity():
     first = t.update([hand(.1)], 0.)[0]["track_id"]
     back = [r for r in t.update([hand(.8)], 1/30) if r["observed"]][0]
     assert back["track_id"] != first
+
+
+def test_record_count_never_exceeds_the_schema_limit_and_observations_survive():
+    t = IdentityTracker(max_records=8)
+    t.update([hand(.02 + .09*i, y=.1 + .2*(i % 3)) for i in range(10)], 0.)   # 10 tracks at once
+    out = t.update([hand(.02, .1)], .5)                      # 9 are lost now, 1 observed
+    assert len(out) <= 8 and sum(r["observed"] for r in out) == 1 and t.capacity_retired == 2
+    out = t.update([hand(.02, .1)], .5 + 1/30)
+    assert len(out) <= 8
+
+
+def test_hand_that_stops_while_unseen_rejoins_its_track():
+    """Fast hand, missed for a few frames, reappears where it was last seen (not where velocity says)."""
+    t = IdentityTracker(**PRESET, last_position_link=True)
+    for i in range(5):
+        tid = [r for r in t.update([hand(.2 + .06*i)], i/30) if r["observed"]][0]["track_id"]
+    for i in range(5, 11):
+        t.update([], i/30)                                    # unseen 0.2 s; prediction runs ahead
+    back = [r for r in t.update([hand(.44)], 11/30) if r["observed"]][0]
+    assert back["track_id"] == tid and back["state"] == "reacquired" and t.last_position_links == 1
+    plain = IdentityTracker(**PRESET)                         # without the link: a new identity
+    for i in range(5):
+        plain.update([hand(.2 + .06*i)], i/30)
+    for i in range(5, 11):
+        plain.update([], i/30)
+    assert [r for r in plain.update([hand(.44)], 11/30) if r["observed"]][0]["track_id"] != tid

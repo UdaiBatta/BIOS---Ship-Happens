@@ -152,7 +152,9 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                               box_link=bool(getattr(args, "box_link", False)),
                               side_weights=({"center_crop_rescue": args.crop_side_weight}
                                             if getattr(args, "crop_side_weight", None) is not None else None),
-                              side_hysteresis=getattr(args, "side_hysteresis", None) or 0.)
+                              side_hysteresis=getattr(args, "side_hysteresis", None) or 0.,
+                              max_records=8,  # frame schema: at most 8 hand records
+                              last_position_link=bool(getattr(args, "last_position_link", False)))
     rss = psutil.Process()
     peak_rss = rss.memory_info().rss
     latency, sample_rows, events = [], [], []
@@ -339,6 +341,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             "reacquisitions": tracker.reacquisitions if args.identity == "persistent" else None,
             "box_links": tracker.box_links if args.identity == "persistent" else None,
             "ghosts_suppressed": tracker.ghosts_suppressed if args.identity == "persistent" else None,
+            "tracks_retired_for_capacity": tracker.capacity_retired if args.identity == "persistent" else None,
+            "last_position_links": tracker.last_position_links if args.identity == "persistent" else None,
             "first_timestamp_s": first_s, "last_timestamp_s": last_s,
             "processing_seconds": elapsed, "end_to_end_fps": processed/elapsed,
             **(extra_metrics or {}),

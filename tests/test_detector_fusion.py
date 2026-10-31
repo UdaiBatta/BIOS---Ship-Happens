@@ -71,6 +71,6 @@ def test_box_on_an_already_found_hand_is_not_used_again():
     found = _hand(.5, .5, size=.1)
     h = _hybrid([[found], [found]], (480, 270, 576, 324, .9), (490, 280))
     h.detect(rgb, 0.)
-    h.recent.append((0., np.array([100., 100.])))               # another hand is missing elsewhere
+    h.recent.append((0., np.array([.1, .2])))                   # another hand is missing elsewhere
     out = h.detect(rgb, 1/30)
     assert len(out) == 1 and h.stats["boxes"] == 0            # the box overlaps the found hand: skipped

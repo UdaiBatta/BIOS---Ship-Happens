@@ -36,7 +36,7 @@ PRESETS = {
     "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0.,
                  "bidirectional": True},
     # recall + an RTMDet hand detector for hands MediaPipe's palm detector misses (needs fetch-model --rtm).
-    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0.,
+    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "last_position_link": True,
                "hand_detector": True},
 }
 
@@ -242,6 +242,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--crop-side-weight", type=float, default=None,
                    help="Weight of a centre-crop-rescue detection's left/right in its track's P(right) "
                         "(default 0.15 like full-frame; 0 = the track keeps its side)")
+    p.add_argument("--last-position-link", action="store_true", default=None,
+                   help="Tracker second pass: an unmatched detection rejoins an unmatched recent track near "
+                        "where it was last seen (part of --preset hybrid; RTMPose recoveries)")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
     p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",

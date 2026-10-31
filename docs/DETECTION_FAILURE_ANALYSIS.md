@@ -56,4 +56,4 @@ The holdout check is in [EXPERIMENT_RESULTS](EXPERIMENT_RESULTS.md).
 | Hidden palm (object, tool, fist, back of hand) | detection (palm detector) | centre crop; reverse-time pass; RTMPose fallback near a known track | Hands never tracked before (the gate needs a recent track) |
 | Image edge, bottom | detection | little: holdout 7/23 recovered with `recall` | A detector trained on truncated egocentric hands |
 | Cloth | detection, then landmarks | RTMPose fallback (dev 16 → 20 of 31) | Landmarks over the cloth are often wrong even when found |
-| Wrong side | identity | see [HANDEDNESS_ROOT_CAUSE](HANDEDNESS_ROOT_CAUSE.md) | About 1 in 5 matched hands is still wrong from the start |
+| Wrong side | identity | see [HANDEDNESS_ROOT_CAUSE](HANDEDNESS_ROOT_CAUSE.md) | About 1 in 10 matched holdout hands is still wrong (5 of 49, `recall`); undecided tracks say unknown |

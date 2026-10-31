@@ -142,7 +142,8 @@ def _box_overlap(a: np.ndarray, b: np.ndarray) -> float:
 class IdentityTracker:
     """Short-term associations, not biometric or guaranteed anatomical identities."""
     def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None, box_link=False,
-                 side_weights: dict | None = None, side_hysteresis: float = 0.):
+                 side_weights: dict | None = None, side_hysteresis: float = 0., max_records: int | None = None,
+                 last_position_link: bool = False):
         """``side_weights``: how much one detection's left/right score moves its track's running
         P(right), per detection path (``origin_detail`` or ``origin``; key ``default``). The
         original behaviour is 0.15 for every path. A weight of 0 means the detection carries no
@@ -165,6 +166,12 @@ class IdentityTracker:
         self.box_link = box_link
         self.side_weights = {"default": .15, **(side_weights or {})}
         self.side_hysteresis = side_hysteresis
+        # The frame schema allows at most 8 hand records. If more tracks are alive, the longest-lost
+        # tracks are retired early (their records dropped); observed hands are never dropped.
+        self.max_records = max_records
+        self.last_position_link = last_position_link
+        self.last_position_links = 0
+        self.capacity_retired = 0
         self.box_links = 0
         self.ghosts_suppressed = 0
         self._missing: set[int] = set()
@@ -234,12 +241,31 @@ class IdentityTracker:
                     overlap = _box_overlap(shifted, d.image[:, :2])
                     if overlap > best_overlap:
                         best, best_overlap = t, overlap
+                state, by_box = "observed", best is not None
+                if best is None and self.last_position_link:
+                    # Recovery link: the hand reappears near where the track was LAST seen (the first
+                    # pass compares with a velocity-extrapolated position, which overshoots when a
+                    # moving hand stops while it is not detected). Same gate radius as the first pass.
+                    nearest = None
+                    for t in active:
+                        age = time - t.last_seen
+                        if t.id in matched_tracks:
+                            continue
+                        distance = np.linalg.norm((d.image[0, :2] - t.detection.image[0, :2])*self.units)
+                        if distance <= min(.32, .10 + age*.55) and (nearest is None or distance < nearest[0]):
+                            nearest = (distance, t)
+                    if nearest is not None:
+                        best = nearest[1]
+                        state = "reacquired" if best.id in self._missing else "observed"
+                        self.last_position_links += 1
                 if best is not None:
-                    self.box_links += 1
+                    self.box_links += by_box
+                    if state == "reacquired":
+                        self.reacquisitions += 1
                     self._missing.discard(best.id)
                     self._update_side(best, d)
                     best.detection, best.last_seen = d, time
-                    records.append(self._observed(best, d, time, "observed"))
+                    records.append(self._observed(best, d, time, state))
                     matched_tracks.add(best.id)
                     matched_detections.add(index)
         for index, d in enumerate(detections):
@@ -269,6 +295,17 @@ class IdentityTracker:
                 records.append(record(t, "predicted", age, image=image))
             else:
                 records.append(record(t, "lost", age))
+        if self.max_records is not None and len(records) > self.max_records:
+            # longest-unseen first: retired, lost, then predicted (a 2D guess); never observed
+            rank = {"retired": 0, "lost": 1, "predicted": 2}
+            droppable = sorted((r for r in records if r["state"] in rank),
+                               key=lambda r: (rank[r["state"]], -r["seconds_since_observed"]))
+            for r in droppable[:len(records) - self.max_records]:
+                records.remove(r)
+                if r["state"] != "retired":
+                    self.tracks.pop(r["track_id"], None)
+                    self._missing.discard(r["track_id"])
+                    self.capacity_retired += 1
         return sorted(records, key=lambda r: r["track_id"])
 
     def _side_weight(self, d: Detection) -> float:

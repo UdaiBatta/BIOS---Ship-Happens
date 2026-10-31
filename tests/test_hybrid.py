@@ -68,7 +68,7 @@ def test_hybrid_skips_found_hands_and_falls_back_to_rtmpose_with_neutral_side():
     h = object.__new__(HybridDetector)
     h.primary, h.crop_reader, h.rtm, h.crop_retry = Primary(), Reader(), Rtm(), True
     h.num_hands, h.pose_threshold, h.fit_3d, h.max_boxes = 2, .45, True, 4
-    h.gate_seconds, h.gate_diagonal, h.recent = .8, .15, [(-.1, np.array([560., 360.]))]
+    h.gate_seconds, h.gate_diagonal, h.recent = .8, .15, [(-.1, np.array([560., 360.])/[960, 540])]
     h.stats = {"boxes": 0, "gated_out": 0, "mediapipe_in_box": 0, "rtmpose_fitted": 0, "rtmpose_rejected": 0}
     out = h.detect(np.zeros((540, 960, 3), np.uint8), 0.)
     assert len(out) == 2 and h.stats["boxes"] == 1

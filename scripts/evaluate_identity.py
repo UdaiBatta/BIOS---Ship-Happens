@@ -4,10 +4,10 @@ Usage:  uv run python scripts/evaluate_identity.py LABELS.json RUN:SPLIT [RUN:SP
 
 - side correct: the tracker's shown side vs the labelled wearer side, on labelled hands that
   an observed wrist matches (0.10 image diagonals, as in `egohand evaluate`);
-- labelled flips: side changes between consecutive labelled samples of one labelled hand,
-  split into "inside one track" and "at a track change";
-- side changes within tracks: every change of a track's shown side over the whole run
-  (labelled or not) - the flicker a viewer sees;
+- labelled flips: Left<->Right changes between consecutive labelled samples of one labelled
+  hand, split into "inside one track" and "at a track change" (unknown -> decided is not a flip);
+- side changes within tracks: every Left<->Right change of a track's shown side over the whole
+  run (labelled or not) - the flicker a viewer sees;
 - ghost frames: a predicted (unobserved) skeleton drawn over an observed hand (>50% box overlap);
 - same-side pairs: frames with two observed hands that both carry the same side (Left or Right);
 - side unknown: matched hands whose track has no side evidence yet (counted as not correct).
@@ -59,14 +59,16 @@ def identity_metrics(run: str, labels: dict, split: str | None) -> dict:
             ok += h["side"] == truth
             unknown += h["side"] not in ("Left", "Right")
             seq[g["gt_id"]].append((h["track_id"], h["side"]))
-    pairs = [(a, b) for s in seq.values() for a, b in zip(s, s[1:])]
+    pairs = [(a, b) for s in seq.values() for a, b in zip(s, s[1:])
+             if a[1] in ("Left", "Right") and b[1] in ("Left", "Right")]   # Left<->Right only
     last, churn, ghosts, two, same = {}, 0, 0, 0, 0
     for idx in sorted(frames):
         hands = frames[idx]["hands"]
         obs = [h for h in hands if h["observed"]]
         for h in obs:
-            churn += h["track_id"] in last and last[h["track_id"]] != h["side"]
-            last[h["track_id"]] = h["side"]
+            if h["side"] in ("Left", "Right"):
+                churn += h["track_id"] in last and last[h["track_id"]] != h["side"]
+                last[h["track_id"]] = h["side"]
         pred = [h for h in hands if h["state"] == "predicted" and h.get("image_xyz")]
         ghosts += any(_overlap(_box(p["image_xyz"]), _box(o["image_xyz"])) > .5 for p in pred for o in obs)
         if len(obs) == 2:

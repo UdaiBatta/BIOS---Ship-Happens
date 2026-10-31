@@ -30,6 +30,14 @@ if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" 
   rm -rf "${TMP:?}"
 fi
 
+# A server or worker left over from an earlier launch keeps running OLD code; stop it first.
+OLD=$(pgrep -f "manage.py (runserver 127.0.0.1:8000|egohand_worker)" || true)
+if [ -n "$OLD" ]; then
+  echo "==> Stopping EgoHand server/worker process(es) from an earlier launch: $OLD"
+  kill $OLD 2>/dev/null || true
+  sleep 2
+fi
+
 echo "==> Preparing the backend database"
 cd backend
 uv run python manage.py migrate -v0

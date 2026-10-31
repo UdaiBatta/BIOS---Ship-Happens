@@ -55,6 +55,20 @@
 
   let runs = [];
   let videos = [];
+  // The preset list comes from the RUNNING server, so the menu never offers a preset an
+  // out-of-date server would reject.
+  async function loadPresets() {
+    const data = await json('presets');
+    const select = document.getElementById('bkPreset');
+    const current = select.value;
+    select.innerHTML = '';
+    for (const [name, info] of Object.entries(data.presets)) {
+      const label = name === 'accurate' ? 'accurate (slower)' : name;
+      select.append(Object.assign(document.createElement('option'), { value: name, textContent: label, title: `${info.description}. ${info.measured}` }));
+    }
+    select.value = data.presets[current] ? current : (data.default || 'recall');
+    return Object.keys(data.presets);
+  }
   async function refresh(selectId) {
     [runs, videos] = await Promise.all([json('runs?status=complete').then((d) => d.runs), json('videos').then((d) => d.videos)]);
     const byId = Object.fromEntries(videos.map((v) => [v.id, v]));
@@ -95,10 +109,18 @@
       try { messages.push(`${name}: ${await addResultFile(await fileFrom(`runs/${id}/artifacts/${artifact}`, name))}`); }
       catch (error) { messages.push(`${name}: not loaded (${error.message})`); }
     }
+    if (run.artifacts?.lift) {
+      try { messages.push(liftReport(await json(`runs/${id}/artifacts/${run.artifacts.lift.summary}`))); }
+      catch { /* the summary was already reported above */ }
+    }
     // Solid hands: a surface generated from the lifted joints (not a fitted hand model).
-    if (window.EgoHandMesh && run.artifacts?.lift) {
-      try { messages.push(`hand surfaces: ${addGeneratedMeshes()}`); }
-      catch (error) { messages.push(`hand surfaces: not built (${error.message})`); }
+    if (!window.EgoHandMesh) {
+      messages.push('3D hand surfaces unavailable: the server is running older code. Close the worker window, stop the server (Ctrl+C) and start scripts/run_local again');
+    } else if (run.artifacts?.lift) {
+      try {
+        messages.push(`hand surfaces: ${addGeneratedMeshes()}`);
+        document.querySelector('#segMode [data-v="ours"]')?.click();   // meshes are drawn in camera space
+      } catch (error) { messages.push(`hand surfaces: not built (${error.message})`); }
     }
     afterResults();
     const video = document.getElementById('video');
@@ -119,6 +141,13 @@
       'Coverage counts frames with a tracked wearer hand; that is coverage, not accuracy. Camera-space 3D uses an ASSUMED lens.';
     toast(messages.join(' · ') || 'Run loaded.');
     status(`run ${id.slice(0, 8)} loaded`);
+  }
+
+  function liftReport(summary) {
+    const rejected = Object.entries(summary.rejections || {}).filter(([reason]) => reason !== 'ok')
+      .sort((a, b) => b[1] - a[1]).map(([reason, n]) => `${reason.replaceAll('_', ' ')} ${n}`);
+    return `camera-space 3D for ${summary.lifted} of ${summary.observed_hands} observed hands` +
+      (rejected.length ? ` (rejected: ${rejected.join(', ')})` : '');
   }
 
   function addGeneratedMeshes() {
@@ -166,7 +195,9 @@
 
   guard(async () => {
     const health = await json('health');
+    const presets = await loadPresets();
     await refresh();
+    if (!presets.includes('accurate')) toast('The server is running older code (no "accurate" preset). Stop it and the worker, then start scripts/run_local again.');
     status(`connected · ${runs.length} run(s)${health.auth_required && !token ? ' · token required (?token=…)' : ''}`);
   })();
 })();

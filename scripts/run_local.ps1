@@ -52,6 +52,19 @@ if ($Test) {
     try { Run 'Backend tests (Django)' { uv run python manage.py test api -v 1 } } finally { Pop-Location }
 }
 
+# A server or worker left over from an earlier launch keeps running OLD code (it does not reload),
+# so it would reject new presets and miss new viewer files. Stop them before starting fresh ones.
+$Old = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'manage\.py"?\s+(runserver\s+127\.0\.0\.1:8000|egohand_worker)' })
+if ($Old.Count) {
+    Write-Host "==> Stopping $($Old.Count) EgoHand server/worker process(es) from an earlier launch" -ForegroundColor Cyan
+    $Old | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
+}
+if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
+    throw 'Port 8000 is still in use by another program. Close it (or the old server window) and run this script again.'
+}
+
 Set-Location (Join-Path $Root 'backend')
 Run 'Preparing the backend database' { uv run python manage.py migrate -v0 }
 $Media = Join-Path $Root 'media'

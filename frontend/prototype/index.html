@@ -76,13 +76,22 @@
   .note { color: var(--muted); }
 
   main {
+    --col-video: 1fr; --col-three: 1fr;
     display: grid; gap: 12px; padding: 12px 16px 16px; align-items: start;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, var(--col-video)) minmax(0, var(--col-three)) 340px;
     grid-template-areas:
       "video three side1"
       "lanes lanes side2"
       "signals signals side3";
   }
+  /* Workspaces: Review hides diagnostics-only panels; Analysis drops the video and 3D panels. */
+  body.ws-review #p-signals, body.ws-review #p-export { display: none; }
+  body.ws-analysis #p-video, body.ws-analysis #p-three { display: none; }
+  body.ws-analysis main { grid-template-areas: "lanes lanes side1" "signals signals side2" "signals signals side3"; }
+  #p-three { position: relative; }
+  .split-handle { position: absolute; left: -9px; top: 0; bottom: 0; width: 6px; cursor: col-resize; border-radius: 3px; }
+  .split-handle:hover, .split-handle.drag { background: var(--axis); }
+  .ws-tabs button { min-width: 74px; }
   @media (max-width: 1250px) {
     main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       grid-template-areas: "video three" "lanes lanes" "signals signals" "side1 side2" "side3 side3"; }
@@ -178,6 +187,14 @@
 <body>
 <header class="top">
   <span class="brand">EGOHAND TWIN</span>
+  <div class="seg ws-tabs" id="segWorkspace" role="tablist" aria-label="Workspace">
+    <button data-v="review" aria-pressed="true" title="Inspect footage, hands in 3D, timeline and events">Review</button>
+    <button data-v="analysis" aria-pressed="false" title="Timeline, motion signals, events and export">Analysis</button>
+    <button data-v="diagnostics" aria-pressed="false" title="Everything, including pipeline diagnostics">Diagnostics</button>
+  </div>
+  <div class="seg" id="segLayout" role="group" aria-label="Video / 3D layout" title="Video / 3D split (or drag the divider)">
+    <button data-v="0.5" aria-pressed="true">Balanced</button><button data-v="0.68" aria-pressed="false">Video</button><button data-v="0.32" aria-pressed="false">3D</button>
+  </div>
   <span class="clip" id="clipInfo">—</span>
   <div class="chips" id="chips"></div>
 </header>
@@ -218,6 +235,7 @@
   </section>
 
   <section class="panel" id="p-three" aria-label="Camera-space 3D view">
+    <div class="split-handle" id="splitHandle" role="separator" aria-orientation="vertical" aria-label="Resize video and 3D panels" title="Drag to resize video / 3D"></div>
     <h2>2 · 3D hands <span class="sub" id="threeSub">camera frame · orbit = drag · zoom = wheel · reset = double-click</span></h2>
     <div class="stage" id="stageThree">
       <canvas id="cvThree" style="cursor: grab"></canvas>
@@ -231,6 +249,9 @@
         <button data-v="both" aria-pressed="true">Mesh + skeleton</button>
       </div>
       <label><input type="checkbox" id="chkTrails" checked> wrist trails (2 s)</label>
+      <label title="Draw mesh edges only"><input type="checkbox" id="chkWire"> wireframe</label>
+      <label title="Mesh opacity">opacity <input type="range" id="rngOpacity" min="0.2" max="1" step="0.05" value="1" style="width: 80px; vertical-align: middle"></label>
+      <button class="btn" id="btnCamReset" title="Reset the 3D camera (also: double-click the 3D view)">Reset view</button>
     </div>
     <div class="legend note" id="meshNote" hidden></div>
   </section>
@@ -861,7 +882,12 @@ function drawThree() {
   }
   drawList.sort((a, b) => b.d - a.d);
   let triFill = null;   // open path of consecutive same-colour triangles (painter order is unchanged)
-  const flushTris = () => { if (triFill) { g.fillStyle = triFill; g.fill(); triFill = null; } };
+  const flushTris = () => {
+    if (!triFill) return;
+    g.globalAlpha = S.meshOpacity ?? 1;
+    if (S.wireframe) { g.strokeStyle = triFill; g.lineWidth = 0.6; g.stroke(); } else { g.fillStyle = triFill; g.fill(); }
+    g.globalAlpha = 1; triFill = null;
+  };
   for (const it of drawList) {
     if (it.kind === 'tri') {
       if (it.fill !== triFill) { flushTris(); triFill = it.fill; g.beginPath(); }
@@ -1627,6 +1653,32 @@ $('btnFwd').addEventListener('click', () => stepFrame(1));
 $('selSpeed').addEventListener('change', (e) => { S.speed = +e.target.value; if (S.video) S.video.playbackRate = S.speed; });
 function bindSeg(id, fn) { const g = $(id); g.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; for (const x of g.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); fn(b.dataset.v); }); }
 bindSeg('segMode', (v) => { S.mode = v; updateThreeBadge(); renderChips(); S.dirty = true; });
+function setWorkspace(v) {
+  document.body.classList.remove('ws-review', 'ws-analysis', 'ws-diagnostics'); document.body.classList.add('ws-' + v);
+  if (v !== 'analysis') $('tlDiag').checked = v === 'diagnostics';     // diagnostics lanes: on in Diagnostics, off in Review
+  S.diagOpen = $('tlDiag').checked; $('p-signals').hidden = !(S.diagOpen || v === 'analysis');
+  renderBreakdown(); S.dirty = true;
+}
+bindSeg('segWorkspace', setWorkspace);
+function setSplit(f) {
+  f = clamp(f, 0.2, 0.8); const m = document.querySelector('main').style;
+  m.setProperty('--col-video', `${(2 * f).toFixed(3)}fr`); m.setProperty('--col-three', `${(2 - 2 * f).toFixed(3)}fr`); S.dirty = true;
+}
+bindSeg('segLayout', (v) => setSplit(+v));
+(() => {
+  const h = $('splitHandle'), main = document.querySelector('main'); let drag = false;
+  h.addEventListener('pointerdown', (e) => { drag = true; h.classList.add('drag'); h.setPointerCapture(e.pointerId); });
+  h.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const v = $('p-video').getBoundingClientRect(), t = $('p-three').getBoundingClientRect();
+    setSplit((e.clientX - v.left) / (t.right - v.left));
+  });
+  h.addEventListener('pointerup', () => { drag = false; h.classList.remove('drag'); });
+})();
+$('chkWire').addEventListener('change', (e) => { S.wireframe = e.target.checked; S.dirty = true; });
+$('rngOpacity').addEventListener('input', (e) => { S.meshOpacity = +e.target.value; S.dirty = true; });
+$('btnCamReset').addEventListener('click', () => { S.orbit = { yaw: -0.12, pitch: 0.62, dist: 0.9 }; S.dirty = true; });
+document.body.classList.add('ws-review');
 bindSeg('segSmooth', (v) => { S.smooth = v === 'smooth'; S.dirty = true; });
 bindSeg('segDisplay', (v) => { S.display = v; S.dirty = true; });
 bindSeg('segEvents', (v) => { S.eventFilter = v; renderEvents(); S.dirty = true; });

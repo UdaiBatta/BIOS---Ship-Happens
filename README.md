@@ -126,6 +126,26 @@ The full method is in [DEFINITIONS](docs/DEFINITIONS.md), with results in [RESUL
 - **Viewer:** disable Rerun analytics.
 - **Governance fields:** these record operator statements, which the software does not verify.
 
+## Frontend viewer (teammate's prototype)
+
+`frontend/prototype/index.html` is a single-file offline viewer: video with the 2D skeleton, 3D hands, reliability lanes, signals, events and exports. It opens with clearly badged synthetic data and can load a local `landmarks.jsonl`, `identity.json`, `lift_*` files and a video; nothing is uploaded. See [frontend/README.md](frontend/README.md).
+
+`schema/egohand_twin_frame.schema.json` is the per-frame JSON Schema (identical to the copy packaged in `src/egohand_twin/schemas/` and used by `egohand validate`). `schema/egohand_twin_frame.example.json` is a synthetic example.
+
+## Compliance setup (every teammate, right after cloning)
+
+```sh
+git config core.hooksPath .githooks
+```
+
+This turns on the pre-commit hook. It rejects:
+- images or video outside `docs/synthetic/`;
+- arrays, caches and model files (`.npy`, `.pkl`, `.jsonl`, `.pth`, `.task`, ...);
+- anything in `data/`, `outputs/`, `frames/` or `labels/`;
+- any file over 2 MB.
+
+Before making the repository public, run `scripts/check_history.sh` to scan the full history for media, data or model files.
+
 ## Documentation
 
 | Document | Use |

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/egohand-twin/frame.schema.json",
+  "title": "EgoHand Twin — per-frame record (landmarks.jsonl line), v1",
+  "description": "One JSON object per processed video frame, including frames with no hands. Extends the EgoHand Twin milestone JSONL with camera-space 3D, wrist pose, grip aperture, quality masks and provenance. Field names follow the milestone where they already exist. Aligned with Project Aria MPS hand tracking (camera/device-frame metres, per-hand confidence, wrist pose, palm normal), Apple EgoDex (per-joint pose + confidence, NaN/0 for occluded) and LeRobot (timestamp / frame_index). Coordinates: image_* are normalised to the source frame; world_* are MediaPipe hand-relative metres; cam_* are camera-frame metres (x right, y down, z forward) estimated with the lens model in manifest.json. Landmark order is MediaPipe's 21-point order unless stated otherwise.",
+  "type": "object",
+  "required": ["frame_index", "timestamp_s", "source_pts_s", "hands"],
+  "additionalProperties": true,
+  "properties": {
+    "frame_index": {"type": "integer", "minimum": 0, "description": "Index of the decoded source frame."},
+    "timestamp_s": {"type": "number", "description": "Seconds since the first source presentation timestamp (PTS)."},
+    "source_pts_s": {"type": "number", "description": "Original source presentation timestamp in seconds."},
+    "quality": {
+      "type": "object",
+      "description": "Frame-level measured signals and HOT3D-style boolean masks.",
+      "properties": {
+        "blur_laplacian_var": {"type": ["number", "null"], "description": "Variance of Laplacian (higher = sharper). Measured."},
+        "mean_luma": {"type": ["number", "null"], "minimum": 0, "maximum": 255},
+        "masks": {
+          "type": "object",
+          "additionalProperties": {"type": "boolean"},
+          "properties": {
+            "hand_observed": {"type": "boolean", "description": "At least one hand has state observed/reacquired."},
+            "low_blur": {"type": "boolean"},
+            "cam_space_valid": {"type": "boolean", "description": "At least one hand has cam_xyz_m with reprojection error under the manifest threshold."}
+          }
+        }
+      }
+    },
+    "hands": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {"$ref": "#/$defs/hand"}
+    }
+  },
+  "$defs": {
+    "xyz": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+    "landmarks21": {
+      "type": ["array", "null"],
+      "items": {"$ref": "#/$defs/xyz"},
+      "minItems": 21,
+      "maxItems": 21
+    },
+    "quaternion": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4, "description": "x, y, z, w"},
+    "hand": {
+      "type": "object",
+      "required": ["track_id", "state", "observed", "anatomical_side"],
+      "additionalProperties": true,
+      "properties": {
+        "track_id": {"type": "integer", "minimum": 1, "description": "Short-term association ID; may change after a hand leaves view."},
+        "state": {"enum": ["observed", "reacquired", "predicted", "lost", "retired"], "description": "Milestone state machine. Only observed/reacquired carry 3D."},
+        "observed": {"type": "boolean"},
+        "seconds_since_observed": {"type": "number", "minimum": 0},
+        "anatomical_side": {"enum": ["wearer_left", "wearer_right", "other", "unknown"], "description": "Offline anatomical identity (not the per-frame classifier)."},
+        "side_probability_right": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "handedness_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "MediaPipe left/right classifier score. NOT a detection or landmark confidence."},
+        "detection_origin": {"enum": ["full_frame", "center_crop_rescue", "tile", "guided_crop", "hand_detector", null], "description": "Which detection path produced this hand."},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Hand-level tracking confidence (Aria-style). Null if no calibrated confidence exists; never copied from handedness_score."},
+        "image_xyz_raw": {"$ref": "#/$defs/landmarks21", "description": "Normalised x,y; z = wrist-relative model depth (not metric). Raw model output."},
+        "image_xyz": {"$ref": "#/$defs/landmarks21", "description": "Filtered image coordinates (or raw with smoothing off). Predicted state may carry 2D only."},
+        "world_xyz_m_raw": {"$ref": "#/$defs/landmarks21", "description": "MediaPipe hand-relative metres, origin near the hand centre. Raw."},
+        "world_xyz_m": {"$ref": "#/$defs/landmarks21"},
+        "cam_xyz_m": {"$ref": "#/$defs/landmarks21", "description": "NEW: camera-frame metres from lens model + PnP root depth, after bone-length calibration. Null when not observed or invalid."},
+        "cam_xyz_m_raw": {"$ref": "#/$defs/landmarks21", "description": "NEW: camera-frame metres before bone-length calibration and smoothing."},
+        "wrist_pose_cam": {
+          "type": ["object", "null"],
+          "description": "NEW: 6-DoF wrist pose in camera frame (Aria-style t + q). Orientation from the palm plane (wrist, index MCP, pinky MCP).",
+          "properties": {"t_m": {"$ref": "#/$defs/xyz"}, "q_xyzw": {"$ref": "#/$defs/quaternion"}},
+          "required": ["t_m", "q_xyzw"]
+        },
+        "palm_normal_cam": {"type": ["array", "null"], "items": {"type": "number"}, "minItems": 3, "maxItems": 3, "description": "NEW: unit normal out of the palm, camera frame."},
+        "grip_aperture_m": {"type": ["number", "null"], "minimum": 0, "description": "NEW: 3D distance thumb tip (4) to index tip (8)."},
+        "quality": {
+          "type": "object",
+          "properties": {
+            "reprojection_error_px": {"type": ["number", "null"], "minimum": 0},
+            "bone_length_cv": {"type": ["number", "null"], "minimum": 0, "description": "Coefficient of variation of bone lengths for this track up to this frame."},
+            "depth_plausible": {"type": ["boolean", "null"], "description": "Wrist depth within the manifest's plausible range (e.g. 0.2-0.9 m)."}
+          }
+        },
+        "mesh_ref": {"type": ["string", "null"], "description": "Optional key of a MANO/WiLoR mesh stored separately (frame_index, track_id)."},
+        "provenance": {
+          "type": "object",
+          "description": "Which fields are measured, predicted by a model, or inferred by rules.",
+          "additionalProperties": {"enum": ["measured", "predicted", "inferred"]}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"enum": ["predicted", "lost", "retired"]}}},
+          "then": {"properties": {
+            "world_xyz_m_raw": {"type": "null"}, "world_xyz_m": {"type": "null"},
+            "cam_xyz_m": {"type": "null"}, "cam_xyz_m_raw": {"type": "null"},
+            "wrist_pose_cam": {"type": "null"}, "image_xyz_raw": {"type": "null"}
+          }}
+        }
+      ]
+    }
+  }
+}

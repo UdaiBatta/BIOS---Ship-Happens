@@ -26,3 +26,8 @@ None of these exists in the code or the results. Do not present any of them as d
 | 15 | Smoother token handling | With `EGOHAND_API_TOKEN` set, the page must be opened once as `/?token=…`, and the token travels in media URLs | Replace with a short login that sets an HttpOnly session cookie |
 | 16 | Faster first Process click on large videos | The first `POST /api/runs` per server process hashes the whole source video in the request (seconds for multi-GB files); the worker checks again | Store size and mtime on `Video` and hash only when they change |
 | 17 | Faster proxy for runs late in long videos | The frame-exact proxy decodes the video from frame 0 up to the run start | Seek the input to just before the first frame and select by timestamp; keep the frame-count check |
+| 18 | Benchmark on the team laptop | All timings come from a 4-vCPU cloud VM | `uv run python scripts/benchmark_hybrid.py data/private/<clip>.mp4 --duration 30` |
+| 19 | Label two-hand frames from the team's recording families | Same-side pairs and hybrid precision cannot be measured on unlabelled families | About 50 frames per family with `egohand annotation-set`; then `scripts/compare_baseline.py` |
+| 20 | Monocular depth test (Depth Anything V2 Small) | Possible hand-vs-background filter for hybrid candidates; untested | Upload the model like the RTM models; follow [DEPTH_FEASIBILITY](DEPTH_FEASIBILITY.md) §4 |
+| 21 | Camera-motion-aided prediction | Head motion moves still hands across the image; not compensated | Background optical flow (excluding hand boxes) to shift track predictions; measure ID changes |
+| 22 | Try `hybrid` + reverse-time pass together | Not tested for time reasons | Dev first; the go/no-go rule in [EXPERIMENT_RESULTS](EXPERIMENT_RESULTS.md) |

@@ -25,7 +25,8 @@ Measured on one clip (one of four recording families) with **provisional labels*
 | Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps). Parallel chunked detection (`--workers 2`): 63 s → 50 s for the recall preset, identical detections |
 | Django backend API with job worker | Implemented; 9 backend tests; endpoints answer in 5–32 ms once a run is indexed |
 | Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens; depth moves ±25% with the assumed FOV |
-| `--preset hybrid` (experimental: RTMDet hand boxes + MediaPipe, RTMPose 2D with borrowed depth) | Dev: no recall gain (36/72) and 11 false positives; rejected as a default, kept to try on other recording families ([RESULTS_V2](docs/RESULTS_V2.md)) |
+| `--preset hybrid` (experimental accuracy mode: RTMPose recovers hands near a recently tracked hand that MediaPipe lost) | Holdout recall 39/78 → 47/78 but precision 0.975 → 0.887 and 2.6× time: **no-go as default** by the pre-set rule; `accurate` has better F1 (0.730 vs 0.718) ([EXPERIMENT_RESULTS](docs/EXPERIMENT_RESULTS.md)) |
+| Left/right flicker fix (crop detections keep the track's side, hysteresis, `unknown` instead of guessing) | Holdout wrong sides 11 → 5 of 49, Left↔Right flips 8 → 2, flicker within tracks 29 → 3; 12 hands now say `unknown` ([HANDEDNESS_ROOT_CAUSE](docs/HANDEDNESS_ROOT_CAUSE.md)) |
 | Solid 3D hands in the viewer | Low-poly surface (432 vertices) generated from the 21 lifted joints when a backend run loads: rounded fingers and a palm slab, typical thickness scaled to the measured palm. **Not a fitted hand-shape model** (no MANO/WiLoR); same assumed-lens depth caveats |
 | Fitted meshes (MANO/WiLoR), robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
 

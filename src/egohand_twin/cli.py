@@ -16,6 +16,7 @@ from .annotate import make_annotation_set, parse_intervals
 from .evaluation import evaluate
 from .identity import write_identity
 from .lift import hand_relative_variation, lift_run
+from .quality import QualityConfig, assess, evaluate_quality, export_segments, write_quality
 from .model import fetch_model, sha256
 from .pipeline import probe, process
 from .render import fit_image, text, rebuild_replay
@@ -80,6 +81,19 @@ def evaluate_command(a):
     print(json.dumps(result, indent=2))
 
 
+def quality_command(a):
+    run, video = Path(a.run), Path(a.video)
+    out = Path(a.out) if a.out else run/"quality"
+    summary = write_quality(run, video, out)
+    if a.labels:
+        result = assess(run, video)
+        ev = evaluate(run, Path(a.labels), allow_provisional=a.allow_provisional, split=a.split)
+        q = evaluate_quality(result["windows"], Path(a.labels), ev, a.split)
+        (out/f"quality_eval_{a.split or 'all'}.json").write_text(json.dumps(q, indent=2)+"\n")
+        summary = {**summary, "label_evaluation": q}
+    print(json.dumps(summary, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -124,8 +138,10 @@ def main():
     p.add_argument("run")
     p.add_argument("--out", required=True, help="New .rrd output filename")
     p.add_argument("--lift", help="Optional lift_*.npz from 'egohand lift' for an experimental camera-space view")
+    p.add_argument("--quality", help="Optional quality directory from 'egohand quality' for the review timeline")
     p.set_defaults(func=lambda a: rebuild_replay(Path(a.video), Path(a.run), Path(a.out),
-                                                 Path(a.lift) if a.lift else None))
+                                                 Path(a.lift) if a.lift else None,
+                                                 Path(a.quality) if a.quality else None))
     p = commands.add_parser("evaluate", help="Score observed detections against manual labels")
     p.add_argument("run")
     p.add_argument("labels")
@@ -149,6 +165,19 @@ def main():
     p.set_defaults(func=lambda a: print(json.dumps({
         "hand_relative_bone_variation": hand_relative_variation(Path(a.run)),
         "lifts": {str(h): lift_run(Path(a.run), h, max_reproj_px=a.max_reproj_px) for h in a.hfov}}, indent=2)))
+    p = commands.add_parser("quality", help="Task-specific quality signals and a timestamped review queue (cached run)")
+    p.add_argument("run")
+    p.add_argument("video")
+    p.add_argument("--out", help="Output directory (default RUN/quality)")
+    p.add_argument("--labels", help="Optional labels to evaluate the flags against")
+    p.add_argument("--allow-provisional", action="store_true")
+    p.add_argument("--split")
+    p.set_defaults(func=quality_command)
+    p = commands.add_parser("export-segments", help="Copy cached records for queue intervals of one status")
+    p.add_argument("run")
+    p.add_argument("--out", required=True)
+    p.add_argument("--status", choices=["suitable", "needs_review", "insufficient_evidence"], default="suitable")
+    p.set_defaults(func=lambda a: print(json.dumps(export_segments(Path(a.run), Path(a.out), a.status), indent=2)))
     p = commands.add_parser("sample-labels", help="Create private annotation frames and an unlabeled template")
     p.add_argument("video")
     p.add_argument("--out", required=True)

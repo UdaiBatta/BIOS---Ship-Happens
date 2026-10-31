@@ -127,7 +127,7 @@ class VideoSink:
 
 
 class RerunSink:
-    def __init__(self, path: Path, lift: dict | None = None):
+    def __init__(self, path: Path, lift: dict | None = None, quality: dict | None = None):
         """``lift`` optionally maps (frame_index, track_id) -> 21x3 camera-space joints from
         ``egohand lift``; it is shown in its own EXPERIMENTAL view, never mixed with the
         hand-relative view."""
@@ -135,6 +135,7 @@ class RerunSink:
         import rerun.blueprint as rrb
         self.rr = rr
         self.lift = lift
+        self.quality = quality
         rr.init("egohand_twin", spawn=False)
         rr.save(str(path))
         views = [rrb.Spatial2DView(origin="video", name="Source + 2D"),
@@ -149,10 +150,15 @@ class RerunSink:
                 origin="camera_space", name=f"EXPERIMENTAL camera space ({lift['label']})",
                 eye_controls=rrb.EyeControls3D(kind=rrb.Eye3DKind.Orbital, position=(.6, -.6, -.5),
                                                look_target=(0., 0., .45), eye_up=(0., -1., 0.))))
+        bottom = [rrb.TextLogView(origin="reliability", name="Tracking events")]
+        if quality is not None:
+            bottom = [rrb.TimeSeriesView(origin="quality/signals", name="Quality signals (heuristic)"),
+                      rrb.TextLogView(origin="quality/queue", name="Review queue"), *bottom]
         rr.send_blueprint(rrb.Blueprint(rrb.Vertical(
             rrb.Horizontal(*views),
-            rrb.TextLogView(origin="reliability", name="Tracking events"),
-            row_shares=[4, 1]), rrb.TimePanel(timeline="video_time"), collapse_panels=True))
+            rrb.Horizontal(*bottom),
+            row_shares=[3, 2] if quality is not None else [4, 1]),
+            rrb.TimePanel(timeline="video_time"), collapse_panels=True))
         rr.log("hands", rr.ViewCoordinates.RDF, static=True)
         if lift is not None:
             rr.log("camera_space", rr.ViewCoordinates.RDF, static=True)
@@ -182,6 +188,20 @@ class RerunSink:
                 root = f"camera_space/hands/track_{hand['track_id']}"
                 rr.log(root+"/joints", rr.Points3D(joints, colors=c, radii=.004))
                 rr.log(root+"/bones", rr.LineStrips3D(joints[np.asarray(CONNECTIONS)], colors=c, radii=.002))
+        if self.quality is not None:
+            row = self.quality["frames"].get(sample["frame_index"])
+            if row is not None:
+                rr.log("quality/signals/observed_hands", rr.Scalars(row["observed_hands"]))
+                rr.log("quality/signals/blur_relative", rr.Scalars(row["blur_laplacian_var"]/self.quality["clip_blur"]))
+                if row["camera_motion_rate"] not in (None, ""):
+                    rr.log("quality/signals/camera_motion_pct_width_per_s_div100",
+                           rr.Scalars(float(row["camera_motion_rate"])/100))
+            for item in self.quality["starts"].get(sample["frame_index"], []):
+                level = {"needs_review": "WARN", "insufficient_evidence": "INFO", "suitable": "DEBUG"}[item["status"]]
+                reasons = ", ".join(f"{r}x{n}" for r, n in sorted(item["reason_window_counts"].items()))
+                rr.log("quality/queue", rr.TextLog(
+                    f'{item["item_id"]} {item["status"]} {item["start_s"]:.1f}-{item["end_s"]:.1f}s '
+                    f'tracks {item["track_ids"]}: {reasons or "no flags"} [heuristic]', level=level))
         occupied_slots = set()
         for hand in sample["hands"]:
             key = hand["track_id"]
@@ -220,7 +240,24 @@ def load_lift(path: Path) -> dict:
     return {"joints": joints, "label": label}
 
 
-def rebuild_replay(video: Path, run: Path, output: Path, lift: Path | None = None):
+def load_quality(directory: Path) -> dict:
+    import csv
+    frames = {}
+    with (directory/"quality_frames.csv").open() as f:
+        for row in csv.DictReader(f):
+            frames[int(row["frame_index"])] = {
+                "observed_hands": int(row["observed_hands"]),
+                "blur_laplacian_var": float(row["blur_laplacian_var"]),
+                "camera_motion_rate": float(row["camera_motion_rate"]) if row["camera_motion_rate"] else None}
+    starts: dict[int, list] = {}
+    for item in json.loads((directory/"review_queue.json").read_text()):
+        starts.setdefault(item["first_frame"], []).append(item)
+    clip_blur = float(np.median([r["blur_laplacian_var"] for r in frames.values()]))
+    return {"frames": frames, "starts": starts, "clip_blur": clip_blur}
+
+
+def rebuild_replay(video: Path, run: Path, output: Path, lift: Path | None = None,
+                   quality: Path | None = None):
     """Re-render cached observations without running or changing the detector."""
     if not (run/"COMPLETE").exists():
         raise ValueError("Run is incomplete")
@@ -231,7 +268,7 @@ def rebuild_replay(video: Path, run: Path, output: Path, lift: Path | None = Non
         raise ValueError("Source video does not match the cached run")
     output.parent.mkdir(parents=True, exist_ok=True)
     cap = cv2.VideoCapture(str(video))
-    sink = RerunSink(output, load_lift(lift) if lift else None)
+    sink = RerunSink(output, load_lift(lift) if lift else None, load_quality(quality) if quality else None)
     count = 0
     try:
         frame_index = -1

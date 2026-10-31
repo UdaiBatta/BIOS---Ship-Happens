@@ -15,6 +15,7 @@ import psutil
 from .annotate import make_annotation_set, parse_intervals
 from .evaluation import evaluate
 from .identity import write_identity
+from .lift import hand_relative_variation, lift_run
 from .model import fetch_model, sha256
 from .pipeline import probe, process
 from .render import fit_image, text, rebuild_replay
@@ -138,6 +139,14 @@ def main():
     p.add_argument("--margin", type=float, default=.15)
     p.add_argument("--min-observed", type=int, default=3)
     p.set_defaults(func=lambda a: print(write_identity(Path(a.run), a.margin, a.min_observed)))
+    p = commands.add_parser("lift", help="EXPERIMENTAL camera-space PnP under an assumed fisheye lens")
+    p.add_argument("run")
+    p.add_argument("--hfov", type=float, nargs="+", default=[150.],
+                   help="Assumed horizontal field(s) of view in degrees; several values give a sensitivity sweep")
+    p.add_argument("--max-reproj-px", type=float, default=25.)
+    p.set_defaults(func=lambda a: print(json.dumps({
+        "hand_relative_bone_variation": hand_relative_variation(Path(a.run)),
+        "lifts": {str(h): lift_run(Path(a.run), h, max_reproj_px=a.max_reproj_px) for h in a.hfov}}, indent=2)))
     p = commands.add_parser("sample-labels", help="Create private annotation frames and an unlabeled template")
     p.add_argument("video")
     p.add_argument("--out", required=True)

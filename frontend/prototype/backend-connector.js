@@ -149,6 +149,18 @@
       try { messages.push(`${name}: ${await addResultFile(await fileFrom(`runs/${id}/artifacts/${artifact}`, name))}`); }
       catch (error) { messages.push(`${name}: not loaded (${error.message})`); }
     }
+    S.extraEvents = [];
+    if (run.artifacts?.motion_events) {
+      try {
+        const data = await json(`runs/${id}/artifacts/motion_events.json`);
+        const decided = await json(`runs/${id}/decisions`).catch(() => ({ decisions: [] }));
+        const latest = Object.fromEntries(decided.decisions.map((d) => [d.item_id, d.verdict]));   // oldest first: last wins
+        for (const e of data.events) if (latest[e.event_id]) e.review_status = latest[e.event_id] === 'confirmed_issue' ? 'confirmed' : latest[e.event_id] === 'false_alarm' ? 'rejected' : latest[e.event_id];
+        S.extraEvents = data.events;
+        S.currentRunId = id;
+        messages.push(`${data.events.length} candidate motion events (inferred, unreviewed)`);
+      } catch (error) { messages.push(`motion events: not loaded (${error.message})`); }
+    }
     if (run.artifacts?.lift) {
       try { messages.push(liftReport(await json(`runs/${id}/artifacts/${run.artifacts.lift.summary}`))); }
       catch { /* the summary was already reported above */ }
@@ -201,6 +213,20 @@
     S.mesh.licence = 'same assumed-lens depth caveats as the camera-space 3D';
     return message;
   }
+
+  // Confirm / reject a candidate motion event (stored with the run's review decisions).
+  window.EgoHandReview = async (event, verdict) => {
+    const reviewer = (localStorage.getItem('egohandReviewer') || prompt('Your initials for the review record:') || '').trim();
+    if (!reviewer) return;
+    localStorage.setItem('egohandReviewer', reviewer);
+    try {
+      await json(`runs/${S.currentRunId}/review-queue/${event.event_id}/decisions`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdict, reviewer, note: `motion event ${event.event_type}` }) });
+      event.review_status = verdict === 'confirmed_issue' ? 'confirmed' : 'rejected';
+      deriveAll(); renderEvents(); renderSelection(); S.dirty = true;
+      toast(`Event ${event.event_id} ${event.review_status} by ${reviewer}.`);
+    } catch (error) { toast(`Review not saved: ${error.message}`); }
+  };
 
   async function processVideo() {
     const videoId = Number(document.getElementById('bkVideo').value);

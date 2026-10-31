@@ -323,10 +323,11 @@ def run_detail(request, run_id):
         lift = lifts[0] if lifts else None
         data["artifacts"] = {
             "identity": identity.name if identity.is_file() else None,
+            "motion_events": "motion_events.json" if (directory/"motion_events.json").is_file() else None,
             "lift": {"summary": lift.name, "arrays": lift.with_suffix(".npz").name} if lift else None,
         }
     else:
-        data.update(proxy=None, artifacts={"identity": None, "lift": None})
+        data.update(proxy=None, artifacts={"identity": None, "lift": None, "motion_events": None})
     return data
 
 
@@ -406,7 +407,11 @@ def run_review_queue(request, run_id):
 def review_decision(request, run_id, item_id: str):
     run = Run.objects.get(pk=run_id)
     queue = services.cached_json(run_dir(run)/"quality"/"review_queue.json")
-    if item_id not in {q["item_id"] for q in queue}:
+    events_path = run_dir(run)/"motion_events.json"
+    motion_ids = {e["event_id"] for e in services.cached_json(events_path)["events"]} if events_path.exists() else set()
+    # Review-queue items and candidate motion events share the decision store (confirm = confirmed_issue,
+    # reject = false_alarm for a motion event).
+    if item_id not in {q["item_id"] for q in queue} | motion_ids:
         raise ApiError("unknown review item", 404)
     data = body(request)
     verdict, reviewer = data.get("verdict"), (data.get("reviewer") or "").strip()
@@ -417,6 +422,13 @@ def review_decision(request, run_id, item_id: str):
     decision = ReviewDecision.objects.create(run=run, item_id=item_id, verdict=verdict, reviewer=reviewer,
                                              note=str(data.get("note", ""))[:2000])
     return JsonResponse(decision.as_dict(), status=201)
+
+
+@api(("GET",))
+def run_decisions(request, run_id):
+    """All review decisions of a run (quality-queue items and candidate motion events), oldest first."""
+    run = Run.objects.get(pk=run_id)
+    return {"decisions": [{**d.as_dict(), "item_id": d.item_id} for d in run.decisions.all()]}
 
 
 @api(("GET",))
@@ -514,7 +526,7 @@ def run_artifact(request, run_id, name: str):
     """Download whitelisted run files (exports) for analysis."""
     allowed = {"landmarks.jsonl", "landmarks.csv", "landmarks.npz", "manifest.json", "metrics.json",
                "tracking_events.csv", "replay.rrd", "quality/review_queue.csv", "quality/quality_frames.csv",
-               "identity.json"}
+               "identity.json", "motion_events.json"}
     if re.fullmatch(r"lift_hfov\d{2,3}\.(npz|json)", name):
         allowed.add(name)
     if name not in allowed:

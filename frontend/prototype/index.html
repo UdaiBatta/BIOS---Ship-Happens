@@ -654,6 +654,15 @@ function deriveEvents(F, lanes) {
     for (const r of toRuns(bad)) if (r.v) ev.push({ type: 'depth_implausible', severity: 'warn', label: `${SIDE_LABEL[side]}: depth outside ${PLAUSIBLE_DEPTH[0]}–${PLAUSIBLE_DEPTH[1]} m`, side, i0: r.i0, i1: r.i1 });
   }
   // Long "3D not valid" runs while no hand is in view are just "no hand": keep only runs that overlap a tracked hand.
+  // Candidate motion events from the backend (motion_events.json): inferred, evidence-linked, reviewable.
+  for (const m of S.extraEvents || []) {
+    if (!['candidate_hold', 'candidate_movement', 'long_gap'].includes(m.event_type)) continue;   // entry/exit duplicate the lanes
+    const i0 = indexAt(m.start_time_s), i1 = Math.max(i0 + 1, indexAt(m.end_time_s) + 1);
+    const who = m.hand === 'left' ? 'Left hand' : m.hand === 'right' ? 'Right hand' : 'Hand (side unknown)';
+    const name = { candidate_hold: 'candidate hold (wrist nearly still)', candidate_movement: 'candidate movement', long_gap: 'long tracking gap' }[m.event_type];
+    ev.push({ type: m.event_type, severity: m.event_type === 'long_gap' ? 'warn' : 'info', label: `${who} · ${name} · #${m.track_id} · ${m.review_status}`,
+      side: m.hand, i0, i1, motion: m });
+  }
   const out = ev.filter((e) => !(e.type === 'cam_space_invalid' && !anyTracked(e.i0, e.i1)));
   for (const e of out) { e.clip_id = S.clipId; e.start_s = T(e.i0); e.end_s = end(e.i1); }
   out.sort((a, b) => a.start_s - b.start_s);
@@ -932,7 +941,9 @@ function xOfT(t, w) { return LANE.labelW + ((t - viewT0()) / ((viewT1() - viewT0
 function tOfX(x, w) { return clamp(viewT0() + ((x - LANE.labelW) / (w - LANE.labelW - 8)) * (viewT1() - viewT0()), S.tStart, S.tEnd); }
 const EV_STYLE = { hand_lost: { c: TL.fail, shape: 'tri', label: 'tracking failure' }, hand_reacquired: { c: TL.reacq, shape: 'dia', label: 'reacquired' },
   hand_appeared: { c: '#9a988f', shape: 'tick', label: 'hand appeared' }, identity_unknown: { c: COLOR.other, shape: 'dot', label: 'side unknown' },
-  cam_space_invalid: { c: TL.fail, shape: 'sq', label: '3D unavailable' } };
+  cam_space_invalid: { c: TL.fail, shape: 'sq', label: '3D unavailable' },
+  candidate_hold: { c: '#5fb3a8', shape: 'sq', label: 'candidate hold' }, candidate_movement: { c: '#8f8bd8', shape: 'tick', label: 'candidate movement' },
+  long_gap: { c: TL.fail, shape: 'tick', label: 'long tracking gap' } };
 function drawLanes() {
   const cv = $('cvLanes'), { rows, axisY } = laneRows(), { g, w, h } = fit(cv, axisY + LANE.axisH);
   // Follow the playhead while playing in a zoomed view.
@@ -1152,6 +1163,12 @@ function renderSelection() {
   add('Video / run', S.clipId || '—');
   add('Segment', `${fmtS(sel.t0)}–${fmtS(sel.t1)} (${num(sel.t1 - sel.t0, 2)} s)`);
   if (sel.event) add('Event', sel.event.label);
+  const mev = sel.event && sel.event.motion;
+  if (mev) {
+    add('Evidence frames', mev.evidence_frames.join(', '));
+    add('Basis', `${mev.basis} · status ${mev.status} (not validated)`);
+    if (mev.quality_flags.length) add('Quality flags', mev.quality_flags.join(', '), 'warn');
+  }
   const hnd = sel.L && f ? handFor(f, sel.L.side) : null;
   if (sel.L) add('Lane', sel.L.label);
   if (hnd) {
@@ -1167,6 +1184,10 @@ function renderSelection() {
   const btn = (label, fn) => { const b = el('button', { class: 'btn' }, label); b.addEventListener('click', fn); act.append(b); };
   btn('Play segment', () => { seek(sel.t0); setPlaying(true); });
   btn('Zoom to segment', () => { const pad = Math.max(0.5, (sel.t1 - sel.t0) * 0.3); setView(sel.t0 - pad, sel.t1 + pad); });
+  if (mev && window.EgoHandReview) {
+    btn('Confirm', () => window.EgoHandReview(mev, 'confirmed_issue'));
+    btn('Reject', () => window.EgoHandReview(mev, 'false_alarm'));
+  }
   btn('Close (Esc)', () => { S.selection = null; renderSelection(); S.dirty = true; });
   box.append(act);
 }

@@ -116,3 +116,22 @@ class MultiVideoTests(TestCase):
         video = self.client.get("/api/videos").json()["videos"][0]
         self.assertFalse(video["available"])
         self.assertEqual(self.post("/api/runs", {"video_id": video["id"]}).status_code, 404)
+
+    def test_motion_events_are_written_reviewable_and_listed(self):
+        write_mp4(self.media/"Sample"/"a.mp4", 30, 10)
+        self.post("/api/videos/scan")
+        run = self.post("/api/runs", {"video_id": Video.objects.get().id, "duration_s": 2}).json()
+        jobs.run_one(jobs.claim_next(), process=fake_process)
+        detail = self.client.get(f"/api/runs/{run['id']}").json()
+        self.assertEqual(detail["artifacts"]["motion_events"], "motion_events.json")
+        events = self.client.get(f"/api/runs/{run['id']}/artifacts/motion_events.json")
+        data = json.loads(b"".join(events.streaming_content))
+        self.assertTrue(data["events"]) ; first = data["events"][0]
+        self.assertEqual(first["status"], "inferred")
+        ok = self.post(f"/api/runs/{run['id']}/review-queue/{first['event_id']}/decisions",
+                       {"verdict": "false_alarm", "reviewer": "UB"})
+        self.assertEqual(ok.status_code, 201)
+        listed = self.client.get(f"/api/runs/{run['id']}/decisions").json()["decisions"]
+        self.assertEqual([(d["item_id"], d["verdict"]) for d in listed], [(first["event_id"], "false_alarm")])
+        self.assertEqual(self.post(f"/api/runs/{run['id']}/review-queue/mev99999/decisions",
+                                   {"verdict": "false_alarm", "reviewer": "UB"}).status_code, 404)

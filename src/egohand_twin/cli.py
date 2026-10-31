@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import psutil
 
-from .annotate import make_annotation_set, parse_intervals
+from .annotate import apply_label_review, label_review_pack, make_annotation_set, parse_intervals
 from .evaluation import evaluate
 from .identity import write_identity, write_identity_jsonl
 from .schema import validate_jsonl
@@ -279,6 +279,18 @@ def main():
     p.add_argument("conditions")
     p.add_argument("--file", default="landmarks.jsonl")
     p.set_defaults(func=lambda a: print(apply_conditions(Path(a.run), Path(a.conditions), a.file)))
+    p = commands.add_parser("label-review", help="Sheets with provisional labels drawn + review.csv for a human reviewer")
+    p.add_argument("video")
+    p.add_argument("labels")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=lambda a: print(json.dumps(label_review_pack(Path(a.video), Path(a.labels), Path(a.out)))))
+    p = commands.add_parser("label-review-apply", help="Merge a filled review.csv into a new labels file")
+    p.add_argument("labels")
+    p.add_argument("review_csv")
+    p.add_argument("--reviewer", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=lambda a: print(json.dumps(apply_label_review(
+        Path(a.labels), Path(a.review_csv), a.reviewer, Path(a.out)), indent=2)))
     p = commands.add_parser("governance-init", help="Write a governance.json template to fill in")
     p.add_argument("--out", required=True)
     p.set_defaults(func=governance_init)

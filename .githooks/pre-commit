@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Compliance gate: blocks media files outside docs/synthetic/, data/model files,
+# and any staged file over 2 MB. Enable with:  git config core.hooksPath .githooks
+set -euo pipefail
+
+MAX_BYTES=$((2 * 1024 * 1024))
+MEDIA_RE='\.(mp4|mov|avi|mkv|webm|m4v|mpg|mpeg|jpg|jpeg|png|gif|bmp|tif|tiff|webp)$'
+DATA_RE='\.(npy|npz|pkl|pickle|jsonl|parquet|h5|hdf5|task|pth|pt|ckpt|onnx|tflite|safetensors)$'
+DIR_RE='(^|/)(data|media|outputs|frames|labels|hackathon_data)/'
+
+fail=0
+while IFS= read -r -d '' f; do
+  lower=$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')
+  if [[ "$lower" =~ $MEDIA_RE ]] && [[ "$f" != docs/synthetic/* ]]; then
+    echo "BLOCKED (media outside docs/synthetic/): $f"; fail=1
+  fi
+  if [[ "$lower" =~ $DATA_RE ]]; then
+    echo "BLOCKED (array/cache/model file): $f"; fail=1
+  fi
+  if [[ "$f" =~ $DIR_RE ]]; then
+    echo "BLOCKED (data folder): $f"; fail=1
+  fi
+  size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+  if (( size > MAX_BYTES )); then
+    echo "BLOCKED (over 2 MB, ${size} bytes): $f"; fail=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if (( fail )); then
+  echo
+  echo "Commit rejected by compliance hook. Footage, labels and real outputs must stay outside the repo."
+  exit 1
+fi

@@ -7,7 +7,11 @@
 - **Repository:** https://github.com/UdaiBatta/BIOS---Ship-Happens
 - **Purpose:** turn head-mounted factory footage into inspectable hand-relative 3D posture estimates and timestamped motion data.
 
-## Short project description
+## Short project description (current)
+
+EgoHand Twin reconstructs hand motion from head-mounted factory video, offline on a CPU, and helps data teams find which seconds are usable, uncertain or missing. It estimates 21 image and 21 hand-relative 3D landmarks per hand with MediaPipe, adds a recovery step that doubled visible-hand recall on held-out frames (19/78 → 39/78, 39/40 correct, provisional labels from one clip), and tracks hands with explicit observed, predicted (2D only) and lost states. A heuristic quality layer marks each second as suitable, needs review or insufficient evidence and builds a ranked, timestamped review queue. Exports are traceable to source frames, validated against a JSON schema, and carry governance and lens provenance. A synchronized Rerun replay shows video, 3D hands, state lanes, the quality timeline and step markers. Coordinates are hand-relative, not factory coordinates. Meshes and robot export are not implemented.
+
+## Short project description (first milestone, historical)
 
 EgoHand Twin is an offline computer-vision pipeline for inspecting hand motion in factory POV videos. It uses MediaPipe to estimate 21 image landmarks and 21 hand-relative 3D landmarks per detected hand, associates observations into short-term tracks, and exposes observed, predicted, lost and reacquired states. A synchronized viewer places the original footage beside 3D hand skeletons and tracking events. Raw and smoothed landmarks export to JSONL, CSV and NPZ for downstream analysis. The system runs on laptop CPU hardware and includes an optional, experimental crop-rescue detector for missed hands. The current implementation reconstructs hand-relative skeleton posture; it does not yet produce hand meshes or validated absolute factory coordinates.
 
@@ -48,6 +52,23 @@ See [the complete measured report](MILESTONE_REPORT.md) for inference latency, m
 7. **4:40–5:00:** state the remaining limits: difficult hand poses, handedness mistakes, identity fragmentation, meshes and calibrated world coordinates.
 
 ## Submission checklist
+
+Current status (v2): see [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) for the audit, [RESULTS_V2.md](RESULTS_V2.md) for measurements and [DEMO_AND_QA.md](DEMO_AND_QA.md) for the demo and Q&A. The short description above remains accurate. Add one sentence: "A heuristic quality layer marks each second as suitable, needs review or insufficient evidence for hand-motion inspection and produces a timestamped review queue and traceable segment exports."
+
+- [x] Split-aware dev/holdout labels: 96 frames, 150 hands. **Provisional — independent human review still required.**
+- [x] Detection recovery chosen on dev and scored once on holdout (recall 0.24 → 0.50, precision 39/40; provisional labels, one clip).
+- [x] Quality windows, review queue, segment export, Rerun quality timeline; flag evaluation and false-alarm burden reported.
+- [x] Verified fast timestamp probe and per-stage timing.
+- [ ] Process at least one clip from each other recording family (blocked here: Drive downloads not reachable from this environment).
+- [ ] Ask the organizers the drafted questions in PRODUCT_BRIEF.md (lens intrinsics, QA framing, sharing of processed outputs).
+- [ ] When the organizers answer, set `consent_status` and `retention_until` in `data/private/governance_mytronlabs.json` (currently `unknown` / null) and reprocess the demo runs with `--governance`. Only runs made with `--governance` (e.g. `runs/final_demo`) record governance; `egohand retention-report runs` lists the rest as `governance_not_recorded`.
+- [ ] Run the review-time pilot (protocol in DEMO_AND_QA.md) or present the benefit as untested.
+- [x] Final demo run regenerated with final code: `runs/final_demo` (`--preset recall`, governance, schema-valid, quality, steps, `why3d_6s.png`, `review.rrd`). Private.
+- [ ] Record the five-minute demo from `runs/final_demo/review.rrd` and `preview.mp4`.
+- [ ] A teammate reviews the labels: `egohand label-review` → fill `data/private/label_review/review.csv` → `label-review-apply` → re-run the evaluation commands in RESULTS_V2 §8.
+- [ ] Before any public copy: remove docs that name clips or describe the footage (RESULTS_V2, AGENT_CONTINUATION_PROMPT, REFERENCE_ARTIFACTS); keep the repository private while release assets are attached.
+
+Historical checklist:
 
 - [x] Working MediaPipe PS4 skeleton baseline.
 - [x] Source code, dependency lock, setup instructions and automated tests.

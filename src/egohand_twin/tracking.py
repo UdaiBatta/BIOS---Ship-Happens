@@ -55,8 +55,31 @@ def right_probability(d: Detection):
     return d.handedness_score if d.side == "Right" else 1. - d.handedness_score
 
 
+EDGE_MARGIN = .02  # normalized image units
+
+
+def missing_reason(track: Track, age: float) -> tuple[str, str]:
+    """Explain why a track is not observed, using only evidence the tracker has.
+
+    Returns (reason, basis). ``out_of_view`` is inferred when the wrist extrapolated
+    from the last observation (velocity x min(age, 0.2 s)) lies outside the image, or
+    when the last observed landmarks touched the image border. Everything else is
+    ``unknown``: the tracker cannot tell occlusion, blur, a low detector score or
+    another person's hand apart, so it does not guess. This is an inference, not an
+    observation; it can be wrong when a hand at the border is simply missed.
+    """
+    xy = track.detection.image[:, :2]
+    extrapolated = xy[0] + track.velocity * min(age, .2)
+    if np.any(extrapolated < 0) or np.any(extrapolated > 1):
+        return "out_of_view", (f"extrapolated wrist ({extrapolated[0]:.3f}, {extrapolated[1]:.3f}) "
+                               "outside the image")
+    if np.any((xy < EDGE_MARGIN) | (xy > 1 - EDGE_MARGIN)):
+        return "out_of_view", "last observed landmarks touched the image border"
+    return "unknown", "no evidence separating occlusion, blur, low detector score or exit"
+
+
 def record(track: Track, state: str, age: float, detection=None, image=None, world=None):
-    return {
+    out = {
         "track_id": track.id,
         "state": state,
         "observed": detection is not None,
@@ -65,6 +88,12 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "side_probability_right_smoothed": track.p_right,
         "detection_index": detection.index if detection else None,
         "detection_origin": detection.origin if detection else None,
+        "detection_origin_detail": detection.origin_detail if detection else None,
+        # Offline anatomical identity is not known while processing; `egohand identity
+        # --write-jsonl` writes a separate file with track-level votes.
+        "anatomical_side": "unknown",
+        # No calibrated hand-level confidence exists; never copied from handedness_score.
+        "confidence": None,
         "raw_side": detection.side if detection else None,
         "handedness_score": detection.handedness_score if detection else None,
         "image_xyz_raw": detection.image.tolist() if detection else None,
@@ -72,13 +101,36 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "image_xyz": image.tolist() if image is not None else None,
         "world_xyz_m": world.tolist() if world is not None else None,
     }
+    # Schema provenance vocabulary: "predicted" = output of a learned model (MediaPipe),
+    # "inferred" = produced by a rule (filtering, extrapolation, voting), "measured" = direct
+    # measurement. Not to be confused with the tracker state "predicted".
+    if detection is not None:
+        out["provenance"] = {"image_xyz_raw": "predicted", "world_xyz_m_raw": "predicted",
+                             "image_xyz": "inferred", "world_xyz_m": "inferred",
+                             "side": "inferred", "handedness_score": "predicted"}
+    elif image is not None:
+        out["provenance"] = {"image_xyz": "inferred", "missing_reason": "inferred", "side": "inferred"}
+    else:
+        out["provenance"] = {"missing_reason": "inferred", "side": "inferred"}
+    if detection is None:
+        reason, basis = missing_reason(track, age)
+        out["missing_reason"], out["missing_reason_basis"] = reason, basis
+        out["missing_reason_provenance"] = "inferred"
+    else:
+        out["missing_reason"] = out["missing_reason_basis"] = out["missing_reason_provenance"] = None
+    return out
 
 
 class IdentityTracker:
     """Short-term associations, not biometric or guaranteed anatomical identities."""
-    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True):
+    def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None):
+        """``frame_size=(width, height)`` measures association distances in image-diagonal
+        units (isotropic in pixels). ``None`` keeps the original normalized x/y units,
+        in which a vertical pixel counts ~1.8x a horizontal pixel on 16:9 video."""
         if predict_s < 0 or retain_s < predict_s:
             raise ValueError("Require 0 <= predict_s <= retain_s")
+        self.units = (np.array(frame_size, dtype=float)/np.hypot(*frame_size)
+                      if frame_size is not None else np.ones(2))
         self.predict_s, self.retain_s = predict_s, retain_s
         self.smoothing = smoothing
         self.tracks: dict[int, Track] = {}
@@ -90,7 +142,7 @@ class IdentityTracker:
     def _cost(self, t: Track, d: Detection, time):
         age = time - t.last_seen
         predicted = t.detection.image[0, :2] + t.velocity * min(age, .2)
-        distance = np.linalg.norm(d.image[0, :2] - predicted)
+        distance = np.linalg.norm((d.image[0, :2] - predicted) * self.units)
         # Finite spatial gate prevents distant re-entries inheriting a stale ID.
         if distance > min(.32, .10 + age * .55):
             return 1e6
@@ -123,7 +175,7 @@ class IdentityTracker:
                 t, d = active[row], detections[col]
                 dt = time - t.last_seen
                 velocity = (d.image[0, :2] - t.detection.image[0, :2]) / dt
-                speed = np.linalg.norm(velocity)
+                speed = np.linalg.norm(velocity * self.units)
                 if speed > 2.:
                     velocity *= 2. / speed
                 t.velocity = .5 * velocity + .5 * t.velocity

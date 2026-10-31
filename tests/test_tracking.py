@@ -95,3 +95,54 @@ def test_crop_coordinates_and_depth_return_to_source_frame():
     np.testing.assert_array_equal(mapped.world, d.world)
     np.testing.assert_array_equal(d.image, original)
     assert mapped.origin == "center_crop_rescue"
+
+
+def test_diagonal_units_treat_pixels_isotropically():
+    def ids(tracker, dx, dy):
+        tracker.update([detection(.5, .5)], 0.)
+        return [h["track_id"] for h in tracker.update([detection(.5+dx, .5+dy)], 1/30) if h["observed"]]
+    # 162 px vertical move on 1920x1080: legacy normalized units over-penalise it.
+    assert ids(IdentityTracker(), 0., .15) == [2]
+    assert ids(IdentityTracker(frame_size=(1920, 1080)), 0., .15) == [1]
+    # 288 px horizontal move is rejected in both unit systems.
+    assert ids(IdentityTracker(frame_size=(1920, 1080)), .15, 0.) == [2]
+
+
+def test_missing_reason_out_of_view_unknown_and_observed():
+    tracker = IdentityTracker(smoothing=False)
+    # Hand moving right towards the border: extrapolated wrist leaves the image.
+    for i, x in enumerate([.90, .94, .975]):
+        hands = tracker.update([detection(x, .5)], i/30)
+    assert hands[0]["missing_reason"] is None and hands[0]["observed"]
+    gone = tracker.update([], 4/30)[0]
+    assert gone["state"] == "predicted" and gone["missing_reason"] == "out_of_view"
+    assert gone["missing_reason_provenance"] == "inferred" and "outside the image" in gone["missing_reason_basis"]
+    # Hand in the middle of the image that stops being detected: no evidence -> unknown.
+    tracker = IdentityTracker(smoothing=False)
+    tracker.update([detection(.4, .5)], 0.)
+    lost = tracker.update([], .3)[0]
+    assert lost["state"] == "lost" and lost["missing_reason"] == "unknown"
+    assert lost["image_xyz"] is None and lost["world_xyz_m"] is None
+
+
+def test_missing_reason_border_touch_without_motion():
+    tracker = IdentityTracker(smoothing=False)
+    d = detection(.5, .99)  # wrist at the bottom border, not moving
+    tracker.update([d], 0.)
+    rec = tracker.update([], .1)[0]
+    assert rec["missing_reason"] == "out_of_view"
+    assert "touched the image border" in rec["missing_reason_basis"]
+
+
+def test_presets_fill_only_unset_options():
+    import argparse
+    from egohand_twin.cli import apply_preset
+    base = dict(detection_threshold=None, presence_threshold=None, tracking_threshold=None, rescue_crop=None)
+    recall = apply_preset(argparse.Namespace(preset="recall", **base))
+    assert (recall.detection_threshold, recall.rescue_crop) == (.3, True)
+    baseline = apply_preset(argparse.Namespace(preset="baseline", **base))
+    assert (baseline.detection_threshold, baseline.rescue_crop) == (.5, False)
+    tiles = apply_preset(argparse.Namespace(preset="recall", rescue="tiles", **base))
+    assert tiles.rescue_crop is False and tiles.detection_threshold == .3
+    override = apply_preset(argparse.Namespace(preset="recall", **{**base, "detection_threshold": .4}))
+    assert (override.detection_threshold, override.presence_threshold) == (.4, .3)

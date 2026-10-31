@@ -1,3 +1,5 @@
+> **Historical baseline (first milestone, measured on an M1 MacBook Air).** Kept unchanged for comparison. Current results are in [RESULTS_V2.md](RESULTS_V2.md); on the Linux test host the same plain run observes 164/900 frames instead of 143/900 (identical timestamps; MediaPipe output differs by platform).
+
 # First functioning milestone — 31 October 2026
 
 **Status:** the MediaPipe PS4 minimum works on real supplied factory footage. Source video, 2D landmarks and hand-relative 3D skeletons are synchronized; raw and filtered estimates export to JSONL/CSV/NPZ. Persistent IDs, explicit missing-data states, timestamped tracking events and Rerun replay are implemented. This is not a validated accuracy result or a finished hackathon submission.

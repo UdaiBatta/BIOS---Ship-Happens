@@ -1,146 +1,198 @@
-# EgoHand Twin — BIOS Ship Happens
+# EgoHand Twin — BIOS Ship Happens (PS4: 3D hand motion)
 
-Offline reconstruction and inspection of hand posture from factory POV video. This first milestone implements MediaPipe's 21 image landmarks and 21 estimated hand-relative 3D landmarks, short-term identity tracking, explicit missing-data states, and synchronized replay. Meshes, calibrated camera poses, and absolute factory coordinates are not implemented.
+EgoHand Twin reconstructs hand motion from head-mounted factory video, offline on a CPU, and helps a data team find which seconds are **usable, uncertain or missing**. Every number traces back to source frames.
 
-See [the measured milestone report](docs/MILESTONE_REPORT.md) for the real-footage results and known detection failures.
+```text
+video -> 21 image + 21 hand-relative 3D landmarks per hand -> short-term tracks with explicit states
+      -> task-specific quality windows -> ranked review queue -> traceable exports + synchronized replay
+```
 
-**Hackathon category:** PS4 — 3D Hand Motion. **Current status:** functioning MediaPipe skeleton baseline, tested on a 30-second interval from one supplied factory clip. Mesh reconstruction and calibrated world-space tracking remain pending. The [submission guide](docs/SUBMISSION.md) contains a concise project summary, measured results and the remaining deliverables.
+Two users: a data engineer preparing hand-motion data, and expert knowledge capture (replay an expert's hands, mark steps, compare flat video with 3D). EgoHand Twin complements setup sheets, ERP and cross-training; it does not replace them.
 
-**Continue development:** use the detailed [continuation prompt](docs/AGENT_CONTINUATION_PROMPT.md) together with the supplied 27-page research PDF. The [reference-artifact guide](docs/REFERENCE_ARTIFACTS.md) explains the private release containing the original downloaded video, all three processed benchmark demos, cached estimates, interactive recordings, annotation templates, checksums and the unchanged PDF. Repository access is required; only one of the 40 original clips has been downloaded or benchmarked.
+## Status (31 Oct 2026)
+
+Measured on one clip (one of four recording families) with **provisional labels**. A single annotator in the coding session made the labels and no person has reviewed them yet; see [RESULTS_V2](docs/RESULTS_V2.md).
+
+| Capability | Status |
+| --- | --- |
+| Landmarks, tracking (observed / predicted 2D-only / lost / retired), raw + filtered exports, Rerun replay | Implemented, verified on real footage |
+| Detection recovery, `--preset recall` (thresholds 0.3 + centre-crop rescue) | Holdout visible-hand recall 19/78 → 39/78, precision 39/40; more track fragmentation (2.17 vs 1.60 IDs per hand) |
+| Quality windows, review queue, segment export, Rerun quality timeline | Implemented; heuristic. Flags catch 22/35 missed-hand frames on holdout; about 12 review items per minute |
+| Reliability in replay: state lanes, side probability, `missing_reason`, units | Implemented; `out_of_view` contradicted in 6/15 holdout cases, so treat it as a hint |
+| Same-moment flat-vs-3D image, `steps.json` step markers with sign-off | Implemented; whether 3D helps users is **not measured** |
+| Per-frame JSON Schema validation, governance and lens provenance in the manifest | Implemented (manifest schema 0.5) |
+| Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps). Parallel chunked detection (`--workers 2`): 63 s → 50 s for the recall preset, identical detections |
+| Django backend API with job worker | Implemented; 9 backend tests; endpoints answer in 5–32 ms once a run is indexed |
+| Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens; depth moves ±25% with the assumed FOV |
+| Meshes, robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
 
 ## Quick start
 
-Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, ordinary laptop CPU. Python 3.14 is intentionally excluded. Setup with [uv](https://docs.astral.sh/uv/):
+**One command (viewer + backend + worker):** put your videos in `media/` at the repo root (git-ignored, never committed), then run
+
+```sh
+bash scripts/run_local.sh                                          # macOS / Linux
+powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1     # Windows (add -Test to run all tests first)
+```
+
+It installs dependencies, registers every video in `media/` (and the handoff clip in `data/private/` if present), starts the worker and opens http://127.0.0.1:8000/. Pick a video on the **Backend** row and click **Process**.
+
+### Manual setup
+
+Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, a laptop CPU.
+- **Linux:** MediaPipe also needs `libgles2 libegl1`.
+- **macOS:** `brew install ffmpeg`.
+- **Windows:** put FFmpeg on PATH.
 
 ```sh
 uv sync --extra dev --extra viewer
-uv run egohand doctor
+uv run egohand doctor                 # checks packages and that MediaPipe's native library loads
 uv run egohand fetch-model
+uv run rerun analytics disable        # keep the viewer fully offline
 ```
 
-On macOS, install FFmpeg with `brew install ffmpeg`. On Windows, install FFmpeg and put both executables on PATH. Download authorized factory clips to `data/private/` locally.
+Process a clip with the chosen detector and review it (authorized clips go in `data/private/`, which git ignores):
 
 ```sh
-uv run egohand process data/private/clip.mp4 --out runs/clip_first30 --duration 30 --rrd
-uv run rerun runs/clip_first30/replay.rrd
+V=data/private/clip.mp4
+uv run egohand process $V --out runs/clip --duration 30 --preset recall --rrd --governance data/private/governance.json
+uv run egohand validate runs/clip                       # per-frame JSON Schema check
+uv run egohand quality runs/clip $V                     # -> runs/clip/quality/ (windows, queue, summary)
+uv run egohand replay $V runs/clip --out runs/clip/review.rrd --quality runs/clip/quality
+uv run rerun runs/clip/review.rrd
 ```
 
-Open `runs/clip_first30/preview.mp4` for a portable, muted, side-by-side video. Rerun offers pause, timeline scrubbing, and a rotatable 3D view synchronized with source presentation timestamps. A `COMPLETE` marker indicates a successful run. Failed output folders must be removed or replaced with a fresh `--out` name before retrying.
+- `--preset baseline` (the default) reproduces the historical plain-MediaPipe runs. Explicit `--detection-threshold` or `--rescue` flags override a preset.
+- Without `--governance`, the manifest records governance as `not_recorded`.
+- If the native viewer fails, serve it to this computer only and open `http://127.0.0.1:9091/?url=rerun%2Bhttp%3A%2F%2F127.0.0.1%3A9877%2Fproxy`:
 
-Replay cached estimates without inference, including after viewer-layout changes:
+  ```sh
+  uv run rerun --serve-web --bind 127.0.0.1 --port 9877 --web-viewer-port 9091 runs/clip/review.rrd
+  ```
+
+## Backend API (for the frontend)
+
+A Django service in `backend/` exposes runs, frames, track lanes, quality windows, the review queue (with reviewer decisions), a frame-exact H.264 proxy and exports as a JSON API. A database-backed worker processes jobs. See [docs/BACKEND_API.md](docs/BACKEND_API.md).
 
 ```sh
-uv run egohand replay data/private/clip.mp4 runs/clip_first30 --out runs/clip_first30/review.rrd
+uv sync --extra dev --extra viewer --extra backend
+cd backend && uv run python manage.py migrate
+uv run python manage.py runserver 127.0.0.1:8000       # and, in another terminal:
+uv run python manage.py egohand_worker --recover
 ```
 
-If the native viewer has a display/renderer problem, use a browser with a server bound to this computer only:
+Open **http://127.0.0.1:8000/**: the teammate's viewer is served with a *Backend* toolbar for loading completed runs (landmarks, side votes, experimental lift, frame-exact proxy video) or queueing new ones.
 
-```sh
-uv run rerun --serve-web --bind 127.0.0.1 --port 9877 --web-viewer-port 9091 runs/clip_first30/replay.rrd
-```
+## Workflow commands
 
-Open `http://127.0.0.1:9091/?url=rerun%2Bhttp%3A%2F%2F127.0.0.1%3A9877%2Fproxy` locally. Pause, then double-click the current time and replace it with e.g. `6s` to inspect a specific moment. Drag inside the 3D view to orbit. The server remains private to the local computer and can be stopped with Ctrl+C.
+| Goal | Command |
+| --- | --- |
+| Export only usable intervals | `egohand export-segments RUN --out DIR --status suitable` |
+| Same-moment flat video vs 3D | `egohand compare VIDEO RUN --time 6.0 --out RUN/why3d.png` |
+| Teach-back step markers | `egohand steps-init RUN --out RUN/steps.json`, `steps-check`, then `replay ... --steps RUN/steps.json` |
+| Offline left/right vote | `egohand identity RUN --write-jsonl` (assumes every hand belongs to the wearer) |
+| Capture conditions and exclusions | `egohand conditions-init VIDEO --out c.json`; `evaluate ... --conditions c.json`; `conditions-apply RUN c.json` |
+| Governance and retention | `egohand governance-init --out g.json`; `egohand retention-report runs` (lists only, never deletes) |
+| Labels and evaluation | `egohand annotation-set` → label → `egohand label-review` (human check) → `label-review-apply` → `egohand evaluate RUN LABELS --split dev\|holdout` |
+| Experimental camera space | `egohand lift RUN --hfov 120 150 180`; `replay ... --lift RUN/lift_hfov150.npz` |
 
-Run a plain baseline for comparison on the identical interval:
-
-```sh
-uv run egohand process data/private/clip.mp4 --out runs/clip_baseline --duration 30 --identity baseline --no-smoothing
-```
-
-`--identity baseline` uses the result index as an ID with **no continuity guarantee**; it retains MediaPipe's internal video tracking. `--detector-mode image` separately disables MediaPipe's video-mode optimization. Compare each factor explicitly. `--no-video` excludes preview encoding; compare runtime only with equal settings. `--stride 2` samples every other source frame, with timestamp-aware tracking. Use stride 1 for final identity evaluation.
-
-`--rescue-crop` is an **experimental, opt-in** detector fallback. When fewer than the requested number of hands are found, an independent image-mode detector checks a fixed center/lower crop, maps its image coordinates back to the full frame, and suppresses candidates whose wrists are within 0.10 normalized image units of an existing detection. Local 3D axes remain unchanged because the crop does not rotate the image. The crop can improve visible detection coverage but can also add false positives or duplicate hands; it is not a proven accuracy improvement. Its origin is recorded as `center_crop_rescue` in JSONL. Compare it against the identical tracker settings without rescue.
+Run `uv run egohand <command> --help` for options. Further experimental flags:
+- `--rescue guided,center,tiles` with `--max-crops` and `--crop-max-side`;
+- `--tracker-units diagonal`;
+- `--timestamp-source frames` (the slow full-decode probe).
 
 ## Outputs
 
 | File | Content |
 | --- | --- |
-| `landmarks.jsonl` | One object per processed frame, including empty frames; all raw and filtered coordinates and track states |
-| `landmarks.csv` | One row per landmark; missing tracks have landmark index -1 and empty coordinates |
-| `landmarks.npz` | One row per track-state sample, 21×3 arrays; missing data is NaN; load with `allow_pickle=False` |
-| `manifest.json` | Source/model hashes, parameters, coordinate definitions, package versions |
-| `metrics.json` | Coverage, runtime, inference latency, sampled process memory; accuracy remains null without labels |
-| `tracking_events.csv` | Timestamped state transitions for finding uncertain/recovered intervals |
-| `preview.mp4` / `preview.jpg` | 1600×900 synchronized inspection render / first frame with the largest observed-hand count |
-| `replay.rrd` | Optional Rerun recording with video, skeletons and reliability events |
-| `COMPLETE` | Successful completion marker |
+| `landmarks.jsonl` | One object per processed frame, including empty frames; raw and filtered coordinates, states, `missing_reason`, provenance, frame quality. Validates against `src/egohand_twin/schemas/egohand_twin_frame.schema.json`. |
+| `landmarks.csv` / `landmarks.npz` | One row per landmark / one row per track sample (21×3, NaN when missing; load with `allow_pickle=False`) |
+| `manifest.json` | Source and model hashes, all parameters (including the preset), coordinate definitions, governance, capture/lens provenance, package versions |
+| `metrics.json` | Coverage, per-stage timing, detector latency, sampled memory. **Coverage is not recall.** |
+| `tracking_events.csv` | Timestamped state changes with `missing_reason` |
+| `preview.mp4` / `replay.rrd` | 1600×900 side-by-side render (header states the settings) / Rerun recording |
+| `quality/` | `quality_frames.csv`, `quality_windows.json`, `review_queue.csv/json`, `quality_summary.json` |
+| `identity.json`, `*.identity.jsonl`, `*.conditions.jsonl`, `lift_*`, `steps.json`, `why3d*.png` | Optional derived files; inputs are never modified and outputs never overwritten |
 
-Timestamp zero is the first source presentation timestamp; a selected interval preserves its original relative time. FFprobe supplies source PTS, including variable frame rates. Portable MP4 output requires CFR input so timing remains accurate; VFR inputs can use `--no-video --rrd`. Convert VFR footage to CFR explicitly if a portable render is needed. Preview audio is omitted. No source footage is uploaded by the processing command.
+Identity votes are bound to the exact `landmarks.jsonl` bytes by `landmarks_sha256`; the viewer and evaluator reject foreign or older unbound identity files. To regenerate an older file, preserve it under a backup name first. The identity command preflights both outputs when `--write-jsonl` is requested, and lift sweeps preflight every JSON/NPZ pair before writing any of them.
 
-## Coordinate and reliability contract
+## Data contract (summary; full definitions in [DEFINITIONS](docs/DEFINITIONS.md))
 
-- `image_xyz_raw`: normalized x/y, with wrist-relative model depth z measured in approximately x-normalized units. It is **not metric depth**.
-- `world_xyz_m_raw`: MediaPipe's estimated meter coordinates with an origin near each hand's geometric center. These are **not absolute factory/world positions**. They have not been calibrated or validated against 3D ground truth.
-- `image_xyz` and `world_xyz_m`: One Euro filtered values, or raw values with `--no-smoothing`. Raw estimates remain available for evaluation. Smoothing may add latency and does not establish improved accuracy.
-- Rendering subtracts the wrist independently from each hand. Hand spacing in the 3D display is arbitrary; inter-hand distance and wrist trajectories cannot be read as factory geometry.
-- `handedness_score` is a left/right classifier score, **not landmark/detection quality**. MediaPipe's confidence thresholds control detection internally; per-joint confidence is not fabricated.
-- Handedness follows the current official Tasks API convention on input pixels. Input mirroring affects labels; validate left/right against a known hand before the demo.
+- **Raw and filtered values are kept separately.** `image_xyz_raw` and `world_xyz_m_raw` are model outputs; `image_xyz` and `world_xyz_m` are One Euro filtered.
+- **Image coordinates:** `image_*` x/y are normalized to the source frame. z is wrist-relative model depth, **not metric**.
+- **Hand-relative 3D:** `world_*` is MediaPipe's hand-relative estimate in metres, origin near the hand centre. It is **not** camera, world or factory coordinates. Display spacing between hands is arbitrary.
+- **Missing data:** `predicted` carries extrapolated 2D only, `lost` and `retired` carry no coordinates, and none of these count as detections. `missing_reason` is an inferred hint (`out_of_view` or `unknown`).
+- **Scores that are not quality measures:** `handedness_score` and `p_R` are left/right classifier probabilities, **not** landmark or detection quality. `confidence` is null because no calibrated confidence exists.
+- **Identity:** track IDs are short-term associations; `anatomical_side` is `unknown` unless the offline vote file is used.
+- **Camera-space fields are not emitted:** `cam_xyz_m`, wrist pose and grip aperture need a calibrated lens.
 
-Tracker assignment combines wrist motion, normalized hand shape and a soft handedness penalty using Hungarian matching. Spatial gates reject implausibly distant matches. State transitions:
+## Evaluation
 
-```text
-observed -> predicted (<=0.15s missing, 2D only) -> lost -> retired (>0.8s)
-     ^          |                                  |
-     +------ reacquired <--------------------------+
-```
+The full method is in [DEFINITIONS](docs/DEFINITIONS.md), with results in [RESULTS_V2](docs/RESULTS_V2.md).
+- Labels are split-aware (dev / holdout).
+- Matching uses observed raw wrists only, one-to-one, gated at 0.10 image diagonals.
+- Unreviewed labels need `--allow-provisional`, and every result from them is stamped provisional.
+- Reports cover: recall and precision with Wilson intervals; recall by visibility, side, tag and condition; left/right confusion; ID changes; fragments; continuity; wrist-gate audit; `missing_reason` checks.
 
-Reacquisition is allowed only before retirement. Prediction never supplies observed or raw coordinates and never invents 3D articulation. Lost/retired coordinates are null. A returning hand after retirement gets a new ID. IDs are short-term associations; crossings, camera movement and occlusions can still cause switches. There is no biometric identity claim. Two simultaneous hands can have the same estimated handedness; the tracker does not force one of each.
+## Privacy
 
-## Quantitative evaluation
+- **Kept out of git:** footage, labels, runs, recordings, previews and NPZ files stay in `data/` and `runs/`, which are git-ignored. No commit on any branch contains media or data files (checked 31 Oct).
+- **Repository access:** keep this repository private while the restricted release assets are attached ([REFERENCE_ARTIFACTS](docs/REFERENCE_ARTIFACTS.md)). A public copy must be source-only, and docs that describe the footage must be removed first.
+- **Viewer:** disable Rerun analytics.
+- **Governance fields:** these record operator statements, which the software does not verify.
 
-```sh
-uv run egohand sample-labels data/private/clip.mp4 --out data/private/annotations --samples 12 --duration 30
-```
+## Frontend viewer (teammate's prototype)
 
-Inspect the full-resolution frames and populate a copy of `labels.template.json`, setting `reviewed` to true after review. **The generated template is unlabeled and cannot be scored unchanged.** Include every visible, labelable hand in each evaluated frame. Example:
+`frontend/prototype/index.html` is a single-file offline viewer: video with the 2D skeleton, 3D hands, reliability lanes, signals, events and exports. It opens with clearly badged synthetic data and can load a local `landmarks.jsonl`, `identity.json`, `lift_*` files and a video; nothing is uploaded. See [frontend/README.md](frontend/README.md).
 
-```json
-{
-  "source_sha256": "COPY_FROM_RUN_MANIFEST",
-  "reviewed": true,
-  "frames": [
-    {"frame_index": 0, "hands": [
-      {"identity": "worker_left", "wrist_xy": [0.31, 0.76]}
-    ]}
-  ]
-}
-```
+`schema/egohand_twin_frame.schema.json` is the per-frame JSON Schema (identical to the copy packaged in `src/egohand_twin/schemas/` and used by `egohand validate`). `schema/egohand_twin_frame.example.json` is a synthetic example.
 
-Optional `landmarks_xy` contains 21 normalized `[x,y]` points or null for unlabeled joints. Use consistent anatomical identities across frames. Annotate before examining model predictions where possible. Sample blur, gloves, occlusion, crossing and re-entry; reserve an untouched holdout for final reporting.
+## Compliance setup (every teammate, right after cloning)
 
 ```sh
-uv run egohand evaluate runs/clip_baseline data/private/labels.json
-uv run egohand evaluate runs/clip_first30 data/private/labels.json
-uv run pytest -q
+git config core.hooksPath .githooks
 ```
 
-Detection matching uses raw observed wrists within 0.10 of the image diagonal (configurable). Precision/recall are only meaningful under that matching protocol. PCK@0.03 diagonal is reported on matched hands if joint labels exist; missing detections are reported separately. Sampled ID switches count changes in associated track ID for the same annotated identity between matched samples. Sparse labels miss events and do not give full-sequence ID-switch counts. No 3D error or industrial productivity result is claimed without appropriate ground truth/testing. Detection coverage is **not recall**.
+This turns on the pre-commit hook. It rejects:
+- images or video outside `docs/synthetic/`;
+- arrays, caches and model files (`.npy`, `.pkl`, `.jsonl`, `.pth`, `.task`, ...);
+- anything in `data/`, `outputs/`, `frames/` or `labels/`;
+- any file over 2 MB.
 
-## Privacy and submission
+Before making the repository public, run `scripts/check_history.sh` to scan the full history for media, data or model files.
 
-`data/`, `runs/`, `models/`, videos, Rerun recordings and NPZ exports are ignored in ordinary source commits. All derived outputs can reveal private task motion and must stay private along with source footage. At the user's request, a restricted reference set is attached to a private repository release for authorized continuation; see [access and restoration](docs/REFERENCE_ARTIFACTS.md). Keep this repository private while those assets are attached. Use the designated private submission folder for the official processed-clip submission, and prepare a separate source-only repository if public access is required. Model assets are downloaded separately from the official source.
+## Documentation
+
+| Document | Use |
+| --- | --- |
+| [PRODUCT_BRIEF](docs/PRODUCT_BRIEF.md) | Product, status audit, priorities, organizer questions |
+| [RESULTS_V2](docs/RESULTS_V2.md) | All current measurements with denominators and reproduction commands |
+| [DEMO_AND_QA](docs/DEMO_AND_QA.md) | Five-minute demo, slides, claims checklist, judges' Q&A, user-test protocols |
+| [DEFINITIONS](docs/DEFINITIONS.md) | Frozen definitions of labels, states and metrics |
+| [SUBMISSION](docs/SUBMISSION.md) | Submission text and checklist |
+| [TODO](docs/TODO.md) | Deferred work with blockers |
+| [BUILD_PROMPT](docs/BUILD_PROMPT.md) | Prompt for future feature work |
+| [MILESTONE_REPORT](docs/MILESTONE_REPORT.md), [WILOR_FEASIBILITY](docs/WILOR_FEASIBILITY.md), [AGENT_CONTINUATION_PROMPT](docs/AGENT_CONTINUATION_PROMPT.md), [REFERENCE_ARTIFACTS](docs/REFERENCE_ARTIFACTS.md) | Historical baseline and handoff material |
 
 ## Repository structure
 
 ```text
 src/egohand_twin/
-  cli.py          Commands, environment inspection and annotation sampling
-  model.py        Official MediaPipe task wrapper and optional crop rescue
-  tracking.py     Short-term identity assignment, state transitions and smoothing
-  pipeline.py     Timestamped processing, exports and measured performance
-  render.py       Video composition and synchronized Rerun replay
-  evaluation.py   Explicit-label precision, recall and sampled ID-switch evaluation
-tests/            Tracking, coordinate mapping and evaluation checks
-docs/             Measured results, submission guide and remaining milestones
-pyproject.toml    Package, command entry point and dependencies
-uv.lock           Locked dependency versions
+  cli.py         commands and presets          pipeline.py   timestamped processing, exports, timing
+  model.py       MediaPipe wrapper, crops      tracking.py   association, states, smoothing, missing_reason
+  render.py      preview video, Rerun replay   evaluation.py labels vs runs, continuity
+  annotate.py    annotation sets, label review quality.py    quality windows, review queue, segment export
+  identity.py    offline left/right vote       compare.py    same-moment flat vs 3D image
+  steps.py       steps.json sidecar            conditions.py capture conditions and exclusions
+  governance.py  governance, retention         schema.py     JSON Schema validation (+ schemas/)
+  lift.py        EXPERIMENTAL camera-space PnP parallel.py   parallel chunked detection, seam repair
+backend/         Django API (api/: models, views, services, jobs, worker command, tests)
+tests/           91 core tests; backend/api/tests: 9 API tests
 ```
 
 ## References
 
-- [MediaPipe Python Hand Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python): current Tasks API, output definitions, handedness and video tracking.
-- [Official model and configuration guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/index): versioned float16 task bundle and configuration semantics.
-- [Rerun timeline concepts](https://rerun.io/docs/concepts/logging-and-ingestion/timelines): synchronized inspection.
-- [WiLoR official implementation](https://github.com/rolpotamias/WiLoR): optional mesh feasibility investigation, not integrated.
-
-See `docs/NEXT_MILESTONES.md` for the remaining hackathon work and `docs/WILOR_FEASIBILITY.md` for the mesh decision.
+- [MediaPipe Hand Landmarker (Python)](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python)
+- [Rerun timelines](https://rerun.io/docs/concepts/logging-and-ingestion/timelines)
+- [OpenCV PnP](https://docs.opencv.org/4.x/d5/d1f/calib3d_solvePnP.html) and [fisheye model](https://docs.opencv.org/4.x/db/d58/group__calib3d__fisheye.html)
+- [WiLoR](https://github.com/rolpotamias/WiLoR) (mesh feasibility only; not integrated)

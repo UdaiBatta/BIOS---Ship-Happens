@@ -19,18 +19,29 @@ from .identity import write_identity, write_identity_jsonl
 from .schema import validate_jsonl
 from .lift import hand_relative_variation, lift_run
 from .compare import compare
-from .conditions import apply_conditions, load_conditions, template as conditions_template
+from .conditions import apply_conditions, template as conditions_template
 from .governance import retention_report, template as governance_template
 from .steps import load_steps, write_template
-from .quality import QualityConfig, assess, evaluate_quality, export_segments, write_quality
+from .quality import assess, evaluate_quality, export_segments, write_quality
 from .model import fetch_model, sha256
 from .pipeline import probe, process
 from .render import fit_image, text, rebuild_replay
 
 
+def mediapipe_runtime() -> str:
+    """Check that MediaPipe's native library loads (on Linux it needs libGLESv2/libEGL)."""
+    try:
+        from mediapipe.tasks.python.core import mediapipe_c_bindings
+        mediapipe_c_bindings.load_raw_library()
+        return "ok"
+    except Exception as error:  # report, do not crash the diagnostic
+        hint = " (Debian/Ubuntu: sudo apt-get install libgles2 libegl1)" if "GL" in str(error) else ""
+        return f"FAILED: {error}{hint}"
+
+
 def doctor(args):
     packages = {}
-    for name in ["mediapipe", "opencv-python", "opencv-contrib-python", "numpy", "scipy", "rerun-sdk"]:
+    for name in ["mediapipe", "opencv-python", "opencv-contrib-python", "numpy", "scipy", "jsonschema", "rerun-sdk"]:
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -40,7 +51,9 @@ def doctor(args):
                       "ram_gb": round(psutil.virtual_memory().total/1024**3, 2),
                       "backend": "MediaPipe CPU (GPU acceleration not assumed)",
                       "ffmpeg": shutil.which("ffmpeg"), "ffprobe": shutil.which("ffprobe"),
-                      "packages": packages}, indent=2))
+                      "packages": packages, "mediapipe_runtime": mediapipe_runtime(),
+                      "notes": ["Disable Rerun usage analytics for offline use: uv run rerun analytics disable"]},
+                     indent=2))
 
 
 def sample_labels(args):

@@ -97,7 +97,6 @@ def crop_relative(target_x, target_y):
 def test_guided_crop_cannot_confirm_itself_beyond_anchor_age():
     full = np.zeros((H, W, 3), np.uint8)
     small = np.zeros((540, 960, 3), np.uint8)
-    seen = {"t": 0.}
 
     def primary(image, t):
         return [hand(.3, .7)] if t == 0. else []

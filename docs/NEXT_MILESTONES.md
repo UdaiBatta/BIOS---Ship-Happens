@@ -1,3 +1,5 @@
+> **Superseded (31 Oct 2026).** These were the original hour-by-hour gates. Current status, priorities and deferred work are in [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) and [TODO.md](TODO.md).
+
 # Hackathon execution gates
 
 This repository starts with the first functioning milestone. It does not imply that all PS4 bonuses or a complete submission are finished.

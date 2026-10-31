@@ -171,13 +171,15 @@ Conclusion: keep hand-relative 3D as the reported result. Camera space is an exp
 
 ## 8. Reproduction
 
+The final demo run (`runs/final_demo`, private) was produced by the same commands with `--preset recall --rrd --governance`. Its 900 frames validate against the frame schema, and its observations are identical to the chosen-configuration runs above (441/441 frames).
+
 ```sh
 V=data/private/mytronlabs-000060-016.mp4
 L=data/private/labels_v2/labels_v2_provisional.json
 T="--detection-threshold .3 --presence-threshold .3 --tracking-threshold .3"
 uv run egohand process $V --out runs/dev_B0 --duration 30 --no-video
-uv run egohand process $V --out runs/dev_chosen --duration 30 --no-video --rescue-crop $T
-uv run egohand process $V --out runs/hold_chosen --start-seconds 60 --duration 90 --no-video --rescue-crop $T
+uv run egohand process $V --out runs/dev_chosen --duration 30 --no-video --preset recall      # = --rescue-crop $T
+uv run egohand process $V --out runs/hold_chosen --start-seconds 60 --duration 90 --no-video --preset recall
 uv run egohand identity runs/dev_chosen
 uv run egohand evaluate runs/dev_chosen $L --allow-provisional --split dev --summary
 uv run egohand quality runs/dev_chosen $V --labels $L --allow-provisional --split dev

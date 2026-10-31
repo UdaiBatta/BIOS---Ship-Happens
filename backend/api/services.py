@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 import subprocess
 import threading
+import uuid
 
 from django.conf import settings
 from django.core.cache import cache
@@ -48,6 +49,16 @@ def allowed_media_path(path: str | Path) -> Path:
                 raise FileNotFoundError(f"Not a file: {resolved.name}")
             return resolved
     raise PermissionError("Path is outside the allowed media folders (EGOHAND_MEDIA_ROOTS)")
+
+
+def display_name(path: Path) -> str:
+    """Name shown in the viewer: the path relative to its media folder (so day1/cam.mp4 and
+    day2/cam.mp4 stay distinguishable); uploads keep their file name."""
+    roots = [*settings.MEDIA_ROOTS, settings.UPLOAD_DIR.resolve()]
+    matches = [root for root in roots if root in path.parents]
+    if not matches:
+        return path.name
+    return path.relative_to(max(matches, key=lambda root: len(root.parts))).as_posix()
 
 
 def assert_video_unchanged(video) -> None:
@@ -232,11 +243,19 @@ def frame_jpeg(video_path: Path, video_sha: str, frame_index: int, pts_s: float,
     if out.exists():
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".tmp.jpg")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{pts_s:.6f}", "-i", str(video_path),
-                    "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(tmp)],
-                   check=True, capture_output=True, timeout=60)
-    tmp.replace(out)
+    tmp = out.with_name(f"{out.stem}.{uuid.uuid4().hex}.tmp.jpg")  # unique per request
+    try:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{pts_s:.6f}", "-i", str(video_path),
+                        "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(tmp)],
+                       check=True, capture_output=True, timeout=60)
+        try:
+            tmp.replace(out)
+        except PermissionError:
+            # Windows: another request is serving the same frame; its copy is identical.
+            if not out.exists():
+                raise
+    finally:
+        tmp.unlink(missing_ok=True)
     return out
 
 

@@ -123,10 +123,13 @@
       start_s: Number(document.getElementById('bkStart').value), duration_s: Number(document.getElementById('bkDur').value) };
     const run = await json('runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     status(`run ${run.id.slice(0, 8)} queued`);
+    const queuedSince = Date.now();
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const current = await json(`runs/${run.id}`);
-      status(`run ${run.id.slice(0, 8)}: ${current.stage} ${(current.progress * 100).toFixed(0)}%`);
+      const waiting = current.status === 'queued' && Date.now() - queuedSince > 10000
+        ? ' (still queued: is the worker running? manage.py egohand_worker)' : '';
+      status(`run ${run.id.slice(0, 8)}: ${current.stage} ${(current.progress * 100).toFixed(0)}%${waiting}`);
       if (current.status === 'complete') { await refresh(run.id); await loadRun(run.id); return; }
       if (['failed', 'cancelled'].includes(current.status)) { toast(`Run ${current.status}: ${current.error || ''}`); return; }
     }

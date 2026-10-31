@@ -119,7 +119,7 @@ def register_video(path: Path) -> Video:
     info = probe(path)
     frames = len(info["timestamps"])
     return Video.objects.create(
-        name=path.name, path=str(path), sha256=source_sha, width=int(info["width"]), height=int(info["height"]),
+        name=services.display_name(path), path=str(path), sha256=source_sha, width=int(info["width"]), height=int(info["height"]),
         fps=info["fps"], frame_count=frames, duration_s=float(info["timestamps"][-1] - info["timestamps"][0]),
         timestamp_source=info["timestamp_source"])
 
@@ -149,6 +149,9 @@ def upload_video(request):
             f.write(chunk)
     try:
         video = register_video(services.allowed_media_path(target))
+    except ApiError:
+        target.unlink(missing_ok=True)
+        raise
     except Exception:
         target.unlink(missing_ok=True)
         raise ApiError("uploaded file could not be read as a video")
@@ -200,7 +203,10 @@ def runs(request):
             return cast(value)
         except (TypeError, ValueError):
             raise ApiError(f"{name} must be a number")
-    video = Video.objects.get(pk=field("video_id", int))
+    video_id = field("video_id", int)
+    if video_id is None:
+        raise ApiError("video_id is required")
+    video = Video.objects.get(pk=video_id)
     services.assert_video_unchanged(video)
     preset = data.get("preset", "recall")
     if preset not in PRESETS:

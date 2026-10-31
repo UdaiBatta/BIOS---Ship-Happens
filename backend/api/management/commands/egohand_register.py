@@ -3,6 +3,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 
+from api.models import Video
 from api.services import allowed_media_path
 from api.views import register_video
 
@@ -29,7 +30,15 @@ class Command(BaseCommand):
                 files.append(path)
         for path in files:
             try:
-                video = register_video(allowed_media_path(path))
+                resolved = allowed_media_path(path)
+                video = Video.objects.filter(path=str(resolved)).first()
+                if video is not None:
+                    # Already registered: skip the full re-hash on every launch. Processing still
+                    # verifies the SHA-256 before a run is queued and again in the worker.
+                    self.stdout.write(json.dumps({"id": video.id, "name": video.name, "frames": video.frame_count,
+                                                  "status": "already registered"}))
+                    continue
+                video = register_video(resolved)
             except Exception as error:  # outside the allowed folders, changed, unreadable or corrupt: skip it
                 failures += 1
                 self.stderr.write(f"Not registered: {path.name}: {error}")

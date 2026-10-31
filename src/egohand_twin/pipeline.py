@@ -95,7 +95,13 @@ def probe(path: Path, timestamp_source: str = "auto", check_frames: int = 48):
             "timestamp_source": source, "timestamp_note": note}
 
 
-def process(args):
+def process(args, progress=None):
+    """Process one video interval into a run directory.
+
+    ``progress``, if given, is called as ``progress(processed_frames, expected_frames)``
+    about once per second of source video (expected is an estimate from timestamps,
+    stride and limits) so a job runner can report status without parsing stdout.
+    """
     started = time.perf_counter()
     source, out = Path(args.video), Path(args.out)
     if not source.is_file():
@@ -165,6 +171,12 @@ def process(args):
             writer.writeheader()
             frame_index = -1
             timestamps = info["timestamps"]
+            relative = np.asarray(timestamps) - timestamps[0]
+            in_range = (relative >= args.start_seconds) & (
+                relative < args.start_seconds + args.duration if args.duration is not None else True)
+            expected = int(np.count_nonzero(in_range)) // max(1, args.stride)
+            if args.max_frames is not None:
+                expected = min(expected, args.max_frames)
             while True:
                 # Frames are always decoded sequentially so frame index <-> PTS stays
                 # exact; frames before the interval or skipped by stride are grabbed
@@ -265,6 +277,8 @@ def process(args):
                     rerun_sink.write(resized, sample)
                 stages["rerun_log"] += time.perf_counter() - mark
                 processed += 1
+                if progress is not None and processed % 30 == 0:
+                    progress(processed, expected)
                 first_s = timestamp if first_s is None else first_s
                 last_s = timestamp
                 peak_rss = max(peak_rss, rss.memory_info().rss)
@@ -346,6 +360,8 @@ def process(args):
         }
         (out/"manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
         (out/"COMPLETE").write_text("Processing completed successfully.\n")
+        if progress is not None:
+            progress(processed, processed)
         print(json.dumps(metrics, indent=2))
         return metrics
     finally:

@@ -19,6 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 viewer = ["rerun-sdk>=0.23,<0.30"]
 dev = ["pytest>=8,<10"]
+backend = [
+    "django>=5.1,<6",
+]
 
 [project.scripts]
 egohand = "egohand_twin.cli:main"

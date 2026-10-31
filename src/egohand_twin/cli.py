@@ -152,7 +152,8 @@ def governance_init(a):
     print(out)
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """The single source of truth for command options (also used by the Django job worker)."""
     parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("doctor", help="Inspect this machine and installed dependencies")
@@ -315,6 +316,17 @@ def main():
     p.set_defaults(func=lambda a: print(len(make_annotation_set(
         Path(a.video), Path(a.out), probe(Path(a.video))["timestamps"],
         parse_intervals(a.intervals), a.step_frames, a.split)["frames"]), "frames"))
+    return parser
+
+
+def process_args(argv: list[str]) -> argparse.Namespace:
+    """Parse and resolve 'process' options exactly as the command line does."""
+    args = build_parser().parse_args(["process", *argv])
+    return apply_preset(args)
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     if getattr(args, "command", None) == "process":
         apply_preset(args)

@@ -14,3 +14,13 @@ None of these exists in the code or the results. Do not present any of them as d
 | 8 | Dual-label a subset; report agreement; then `reviewed=true` and re-score | Needs a second person | Start with uncertain-side and truncated hands in `data/private/labels_v2/` |
 | 9 | Other recording families (SGF00106, SKL00089, 000003) | Drive downloads blocked in this environment | Download one clip per family locally; rerun the evaluation |
 | 10 | Lens calibration / organizer intrinsics | Organizer answer | Draft questions in [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) |
+
+## After the code review (viewer and backend caveats, 31 Oct 2026)
+
+| # | Item | Why | First step |
+| --- | --- | --- | --- |
+| 11 | Validate camera-space depth | The viewer's 3D panel uses an **assumed** equidistant fisheye lens (HFOV 150°); depth is not validated, and the label says so | Get the organizer intrinsics, or calibrate a consented own recording; measure depth error in cm before removing the "experimental" label |
+| 12 | Replace coverage-only evidence with reviewed accuracy | The viewer's coverage chip is coverage, not accuracy; all accuracy figures come from unreviewed labels on one clip | Human label review (`egohand label-review`), clips from other recording families, re-score |
+| 13 | Recover hands cut off at the bottom edge | Still often missed (7/23 on holdout; visible in the 60–70 s run); cheap crop variants did not help | Benchmark a dedicated hand detector in an isolated environment (licence check first) |
+| 14 | Keep restricted footage local in demos | The viewer plays a proxy of restricted footage | Keep the server on 127.0.0.1; no screenshots in public material; consider refusing non-local binds without a token |
+| 15 | Smoother token handling | With `EGOHAND_API_TOKEN` set, the page must be opened once as `/?token=…`, and the token travels in media URLs | Replace with a short login that sets an HttpOnly session cookie |

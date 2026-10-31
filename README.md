@@ -203,6 +203,19 @@ Runs created before schema 0.5 lack `anatomical_side` and fail validation; repro
 
 Camera-space fields (`cam_xyz_m`, `wrist_pose_cam`, `palm_normal_cam`, `grip_aperture_m`, `quality.reprojection_error_px`) are **not emitted**. The lens is uncalibrated and the experimental lift is kept in separate `lift_*` files.
 
+## Capture conditions, exclusions and continuity
+
+```sh
+uv run egohand conditions-init $V --out data/private/conditions.json        # bound to the source video
+uv run egohand evaluate runs/clip_v3 labels.json --conditions data/private/conditions.json --split dev
+uv run egohand conditions-apply runs/clip_v3 data/private/conditions.json  # adds landmarks.conditions.jsonl
+```
+
+- Conditions (`glove_ppe`, `occlusion`, `lighting`) and exclusions are human annotations.
+- Excluded frames are removed from metrics but always reported, with their reasons.
+- `evaluate` also reports `fragments` (track IDs per labeled hand) and `run_continuity` (predicted-run and bridged-gap statistics).
+- Definitions are frozen in [docs/DEFINITIONS.md](docs/DEFINITIONS.md). Deferred work is in [docs/TODO.md](docs/TODO.md). The refreshed build prompt is in [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md).
+
 ## Governance, retention and lens provenance (manifest schema 0.4)
 
 ```sh

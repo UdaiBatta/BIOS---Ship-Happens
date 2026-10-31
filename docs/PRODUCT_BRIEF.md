@@ -32,7 +32,11 @@ Primary user: a data engineer preparing factory demonstrations for hand-motion a
 - Reliability shown in the replay: per-track state lanes, side probability, inferred `missing_reason` (measured: often wrong at the image edge), units and coordinate frames in view titles.
 - Teach-back helpers: same-moment flat-vs-3D image (`compare`) and a `steps.json` sidecar with reviewer sign-off.
 - Governance and lens provenance in `manifest.json` (schema 0.4), validated before processing, plus a retention report that never deletes anything.
-- 65 automated tests.
+- Per-frame output validates against `egohand_twin_frame.schema.json` (`egohand validate`).
+- Capture conditions and exclusions in a `conditions.json` sidecar, with evaluation sliced by condition.
+- Continuity metrics: fragments per labeled hand; predicted-run and bridged-gap statistics.
+- Frozen definitions in [DEFINITIONS.md](DEFINITIONS.md); deferred work in [TODO.md](TODO.md); refreshed build prompt in [BUILD_PROMPT.md](BUILD_PROMPT.md).
+- 82 automated tests.
 
 **B. Implemented, not adequately validated**
 - **Labels:** 96 frames / 150 hands, all **provisional**. A single annotator from the coding session read them visually from grid overlays; they have **not been independently reviewed by a person**. Every number computed from them is stamped provisional.

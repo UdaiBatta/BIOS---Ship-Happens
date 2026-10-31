@@ -23,6 +23,32 @@
 | 4:10–4:40 | Results table (holdout) + one unresolved failure (hands gripping the slab edge at the bottom: 7/23 recovered) | "This is what we measured, with denominators. This failure remains." |
 | 4:40–5:00 | Limits slide | "Hand-relative 3D, not factory coordinates. Camera-space depth is an experiment under an assumed lens. One clip, one recording family, provisional labels." |
 
+## Pitch line and positioning
+
+> "When half the shop lives in one person's head, EgoHand Twin records what their hands actually do — lets anyone replay it from any angle — and tells a data team which seconds are usable, uncertain or missing."
+
+- EgoHand Twin **complements** ERP, setup sheets and cross-training; it never replaces them.
+- The second market is robot-learning data teams. Name its limits: no robot export, no retargeting, not robot-tested, hand-relative coordinates.
+- Lead with replay and evidence, not dashboards. Use worker-friendly language: knowledge capture, not monitoring.
+
+## Slide and claim review checklist (run on every slide before presenting)
+
+1. Does the slide serve a named decision, and say what it beats (ordinary video, setup sheet, ERP)?
+2. Is uncertainty visible: observed/predicted/lost, side probability, units, coordinate frame, "provisional labels"?
+3. Does every number carry its numerator, denominator and n, and point to the run or frames it came from?
+4. Forbidden claims, none of which may appear:
+   - "detects contact / force / grasp quality";
+   - "measures productivity";
+   - "ensures safety / quality";
+   - "factory/world coordinates";
+   - "robot-ready, proven";
+   - "coverage = accuracy";
+   - "replaces ERP / setup sheets / training";
+   - any per-worker score or ranking.
+5. Privacy: no factory frames, faces, screens or documents on public slides. Use our own consented recordings or drawings only.
+6. Do the numbers match RESULTS_V2.md, with schema-valid outputs and passing tests?
+7. Is setup still one command, offline and laptop-friendly?
+
 ## Slide outline (6 slides)
 
 1. **Problem:** factory POV hand motion is valuable data but hard to extract and to trust; teams need to know which footage is usable.

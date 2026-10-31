@@ -83,6 +83,30 @@ Chosen configuration, re-run with the new field. Observations are identical to t
 - **Most `unknown` gaps are detector misses.** In labeled frames, the hand is usually still visible nearby: 21/23 on holdout. A "lost" track does not mean the hand is gone.
 - **The rule was not retuned.** Only the holdout shows the problem clearly, so retuning it would leak holdout evidence into the design.
 
+## 4c. Continuity and capture conditions (schema 0.5 runs, provisional labels)
+
+| Split / config | Labeled hands with matches | Mean (max) track IDs per labeled hand | Tracks | Bridged gaps n, median, max | Longest predicted run |
+| --- | ---: | --- | ---: | --- | ---: |
+| dev, B0 | 4 | 2.00 (3) | 12 | 28, 0.10 s, 0.73 s | 0.133 s |
+| dev, chosen | 4 | 4.00 (8) | 22 | 65, 0.07 s, 0.63 s | 0.133 s |
+| holdout, B0 | 5 | 1.60 (3) | 26 | 40, 0.15 s, 0.73 s | 0.133 s |
+| holdout, chosen | 6 | 2.17 (3) | 44 | 135, 0.13 s, 0.80 s | 0.133 s |
+
+- **Predicted runs stay under the 0.15 s 2D-only cap.** Bridged gaps reach the 0.8 s retention limit.
+- **The recovery setting trades continuity for recall.** It produces more tracks and more fragments per labeled hand.
+- **"Tracks ending unobserved" adds nothing:** every track ends that way, because all tracks eventually retire.
+
+Recall by capture condition. The conditions are a provisional single-annotator `conditions.json`; nothing was excluded.
+
+| Split / config | lighting ok | lighting harsh | occlusion none | occlusion partial |
+| --- | ---: | ---: | ---: | ---: |
+| dev, B0 | 15/60 | 2/12 | 2/12 | 15/60 |
+| dev, chosen | 30/60 | 6/12 | 6/12 | 30/60 |
+| holdout, B0 | 14/47 | 5/31 | 10/50 | 9/28 |
+| holdout, chosen | 25/47 | 14/31 | 22/50 | 17/28 |
+
+**These slices are confounded with activity.** On dev, "harsh lighting" and "no occlusion" are both the 12–30 s walking interval, where hands are mostly cut off at the image edge. With one clip, lighting or occlusion effects cannot be separated from the task, so do not read these as causal effects.
+
 ## 5. Quality layer (heuristic; thresholds set on the dev interval)
 
 `egohand quality` produces per-frame signals, 1 s windows (*suitable / needs_review / insufficient_evidence*) and a ranked queue. To check it against the labels, each labeled frame is classified using the same matching as above:

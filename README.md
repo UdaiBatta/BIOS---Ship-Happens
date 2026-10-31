@@ -1,10 +1,16 @@
-# DemoForge
+# EgoHand Twin
 
-Turn factory head-camera footage into quality-scored 3D hand episodes: where each hand is in 3D, how it moves, and which clips are good enough to use. Every 3D number states how it was checked.
+Real factory hands, rebuilt in 3D from a head camera, with an honest confidence label on every frame, and exportable as robot training data.
 
 Hackathon entry for **Problem Statement 4 (3D hand motion)**, built on top of reliable two-hand tracking (PS1).
 
 > Status: setting up. No performance numbers are claimed yet.
+
+## Repo layout
+
+- `frontend/`: offline viewer prototype (open `frontend/prototype/index.html`). See `frontend/README.md`.
+- `schema/`: per-frame output schema (`egohand_twin_frame.schema.json`, JSON Schema 2020-12) and a synthetic example record.
+- `scripts/`, `.githooks/`: compliance checks.
 
 ## One-time setup (every teammate, right after cloning)
 

@@ -50,7 +50,10 @@ Each answer has: a short answer (20–30 s), its **evidence**, a longer technica
 **3. How do you tell a detector failure from a hand leaving the frame?**
 - *Short:* not perfectly. We distinguish *observed*, *recently seen then missing* (predicted/lost) and *no observed hand*, and label the last one "insufficient evidence", never "no hand".
 - *Evidence:* on holdout, 12 of 18 labeled frames in B0's insufficient-evidence windows had a visible hand. Visibility labels (full/occluded/truncated) give recall per category.
-- *Detail:* edge-proximity flags mark hands at the boundary; missing-track gaps mark a hand that disappeared mid-interval.
+- *Detail:*
+  - Each missing track carries `missing_reason`. `out_of_view` means the extrapolated wrist left the image or the hand was at the border; otherwise it is `unknown`. The evidence is shown in the replay log.
+  - Measured on holdout: 6 of 15 `out_of_view` claims were contradicted by a labeled hand still nearby, and 21 of 23 `unknown` gaps had a visible but undetected hand. Mostly the detector misses the hand; it hasn't gone.
+  - Edge-proximity flags mark hands at the boundary; missing-track gaps mark a hand that disappeared mid-interval.
 - *Fallback:* no automatic visible-but-undetected classifier.
 
 **4. Does your quality assessment predict downstream training performance?**

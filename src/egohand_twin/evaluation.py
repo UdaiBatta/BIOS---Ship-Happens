@@ -130,6 +130,17 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
     origin_counts = defaultdict(lambda: [0, 0])
     audit = {t: [0, 0] for t in audit_thresholds}
     frames_with_gt = frames_with_gt_and_pred = 0
+    # Last observed wrist per track (scanning every processed frame in order), used to
+    # check missing_reason claims against labeled hands that were not detected.
+    last_wrist: dict[int, dict[int, np.ndarray]] = {}
+    current: dict[int, np.ndarray] = {}
+    for index in sorted(predictions):
+        last_wrist[index] = dict(current)
+        for p in predictions[index]["hands"]:
+            if p["observed"]:
+                current[p["track_id"]] = np.array(p["image_xyz_raw"][0][:2])
+    reason_check = {"out_of_view": [0, 0], "unknown": [0, 0]}
+    nearby = .15
     id_pairs = id_changes = 0
     for frame in sorted(annotations["frames"], key=lambda x: x["frame_index"]):
         index = frame["frame_index"]
@@ -146,6 +157,15 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
             m, _ = _match(gt, pred, scale, t)
             audit[t][0] += len(m)
             audit[t][1] += len(pred) - len(m)
+        unmatched_gt = [g for r, g in enumerate(gt) if r not in {m[0] for m in matches}]
+        for p in predictions[index]["hands"]:
+            reason = p.get("missing_reason")
+            if p["observed"] or reason not in reason_check or p["track_id"] not in last_wrist[index]:
+                continue
+            wrist = last_wrist[index][p["track_id"]]
+            close = any(np.linalg.norm((np.array(g["wrist_xy"]) - wrist)*scale) <= nearby for g in unmatched_gt)
+            reason_check[reason][0] += 1
+            reason_check[reason][1] += bool(close)
         frames_with_gt += bool(gt)
         frames_with_gt_and_pred += bool(gt) and bool(pred)
         tp += len(matches)
@@ -247,6 +267,13 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
         "side_accuracy_track_smoothed": side_summary(side_track),
         "side_accuracy_offline_track_vote": side_summary(side_vote) if votes is not None else None,
         "detections_by_origin": {k: {"matched": v[0], "unmatched": v[1]} for k, v in sorted(origin_counts.items())},
+        "missing_reason_check": {
+            "rule": f"a labeled, undetected hand lies within {nearby} image diagonals of the track's last observed wrist",
+            "out_of_view": {"claims": reason_check["out_of_view"][0],
+                            "contradicted_by_nearby_undetected_hand": reason_check["out_of_view"][1]},
+            "unknown": {"records": reason_check["unknown"][0],
+                        "with_nearby_undetected_hand": reason_check["unknown"][1]},
+            "note": "Only non-observed track records in labeled frames; runs without missing_reason report zeros."},
         "sampled_identity_switches": switches,
         "sampled_identity_pairs": id_pairs,
         "pck_on_matched_hands": points_correct/points_total if points_total else None,

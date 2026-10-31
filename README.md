@@ -127,6 +127,15 @@ Timestamp zero is the first source presentation timestamp; a selected interval p
 - `lift_hfov*.npz` (experimental, separate files): camera coordinates (x right, y down, z forward) from PnP under an **assumed** equidistant fisheye. Depth changes by ±25% across assumed FOVs of 120–180°, and reprojection error cannot tell them apart. Not factory coordinates and not validated.
 - `image_xyz` and `world_xyz_m`: One Euro filtered values, or raw values with `--no-smoothing`. Raw estimates remain available for evaluation. Smoothing may add latency and does not establish improved accuracy.
 - Rendering subtracts the wrist independently from each hand. Hand spacing in the 3D display is arbitrary; inter-hand distance and wrist trajectories cannot be read as factory geometry.
+- `missing_reason` (schema 0.3, non-observed tracks only) is `out_of_view` or `unknown`, with `missing_reason_basis` and `missing_reason_provenance: "inferred"`.
+  - `out_of_view` means the extrapolated wrist left the image, or the last observed landmarks touched the border.
+  - Everything else is `unknown`: the tracker cannot tell occlusion, blur and low detector score apart, so it does not guess.
+  - On holdout (provisional labels), 6 of 15 `out_of_view` claims were contradicted by a labeled but undetected hand near the last position. Treat the reason as a hint.
+  - The field appears in JSONL, CSV, NPZ and `tracking_events.csv`.
+- Replay shows reliability directly:
+  - Each label reads `#id side p_R=… state (reason)`, where `p_R` is side probability, not landmark quality.
+  - A "Track state lanes" plot has one row per track: observed-Left green, observed-Right orange, predicted (2D-only) grey, lost red.
+  - View titles state units and coordinate frames.
 - `handedness_score` is a left/right classifier score, **not landmark/detection quality**. MediaPipe's confidence thresholds control detection internally; per-joint confidence is not fabricated.
 - Handedness follows the current official Tasks API convention on input pixels. Input mirroring affects labels; validate left/right against a known hand before the demo.
 

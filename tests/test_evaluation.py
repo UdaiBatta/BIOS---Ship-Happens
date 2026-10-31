@@ -147,3 +147,20 @@ def test_offline_track_vote_reported_and_unknown_not_forced(tmp_path):
     assert r["side_accuracy_raw_per_frame"]["all"]["accuracy_as_labeled"]["k"] == 0  # frame 2: L flipped to Right, R reported Left
     vote = r["side_accuracy_offline_track_vote"]["all"]
     assert vote["accuracy_as_labeled"]["k"] == 1 and vote["confusion"]["wearer_right->unknown"] == 1
+
+
+def test_missing_reason_claims_checked_against_undetected_labeled_hands(tmp_path):
+    out = {"track_id": 1, "observed": False, "state": "lost", "side": "Left",
+           "missing_reason": "out_of_view", "image_xyz_raw": None}
+    unk = {"track_id": 2, "observed": False, "state": "lost", "side": "Left",
+           "missing_reason": "unknown", "image_xyz_raw": None}
+    _v2_run(tmp_path, [
+        {"frame_index": 0, "hands": [_hand(1, .2, .5), _hand(2, .8, .5)]},
+        {"frame_index": 1, "hands": [out, unk]},
+    ])
+    labels = _labels(tmp_path, [{"frame_index": 1, "split": "dev", "hands": [
+        {"gt_id": "a", "side": "wearer_left", "wrist_xy": [.22, .5], "visibility": "occluded"}]}])
+    check = evaluate(tmp_path, labels, allow_provisional=True)["missing_reason_check"]
+    # The "out_of_view" track's hand is still visible (labeled) near its last wrist: contradicted.
+    assert check["out_of_view"] == {"claims": 1, "contradicted_by_nearby_undetected_hand": 1}
+    assert check["unknown"] == {"records": 1, "with_nearby_undetected_hand": 0}

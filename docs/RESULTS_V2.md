@@ -70,6 +70,19 @@ Findings:
 - **Aspect-correct tracker distances** (`--tracker-units diagonal`) changed nothing for B0 and reduced dev ID changes from 12 to 9 for the chosen configuration, but lowered vote accuracy. The evidence is inconclusive, so the default is unchanged.
 - **ID changes** are sampled at sparse labeled frames, often 0.4–0.7 s apart. They are not full-sequence switch counts.
 
+## 4b. Why is a hand missing? (`missing_reason`, schema 0.3)
+
+Chosen configuration, re-run with the new field. Observations are identical to the §2/§3 runs: 441/441 dev frames, zero coordinate difference.
+
+| Split | Non-observed track samples: out_of_view / unknown (whole run) | `out_of_view` claims in labeled frames contradicted by a nearby undetected labeled hand (within 0.15 diag of the last wrist) | `unknown` records in labeled frames with a nearby undetected labeled hand |
+| --- | --- | ---: | ---: |
+| dev (0–30 s) | 167 / 608 | 2 / 4 | 25 / 38 |
+| holdout (60–150 s) | 823 / 981 | 6 / 15 | 21 / 23 |
+
+- **Read `out_of_view` as a hint.** It is wrong about 40% of the time on holdout, typically for hands gripping the slab at the bottom edge.
+- **Most `unknown` gaps are detector misses.** In labeled frames, the hand is usually still visible nearby: 21/23 on holdout. A "lost" track does not mean the hand is gone.
+- **The rule was not retuned.** Only the holdout shows the problem clearly, so retuning it would leak holdout evidence into the design.
+
 ## 5. Quality layer (heuristic; thresholds set on the dev interval)
 
 `egohand quality` produces per-frame signals, 1 s windows (*suitable / needs_review / insufficient_evidence*) and a ranked queue. To check it against the labels, each labeled frame is classified using the same matching as above:

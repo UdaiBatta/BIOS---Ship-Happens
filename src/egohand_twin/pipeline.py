@@ -148,7 +148,7 @@ def process(args):
         fields = ["frame_index", "timestamp_s", "track_id", "state", "observed", "side",
                   "handedness_score", "landmark_index", "x_norm", "y_norm", "z_norm",
                   "world_x_m", "world_y_m", "world_z_m", "raw_x_norm", "raw_y_norm",
-                  "raw_z_norm", "raw_world_x_m", "raw_world_y_m", "raw_world_z_m"]
+                  "raw_z_norm", "raw_world_x_m", "raw_world_y_m", "raw_world_z_m", "missing_reason"]
         with (out/"landmarks.jsonl").open("w") as jf, (out/"landmarks.csv").open("w", newline="") as cf:
             writer = csv.DictWriter(cf, fieldnames=fields)
             writer.writeheader()
@@ -214,10 +214,12 @@ def process(args):
                     if previous != hand["state"]:
                         events.append({"frame_index": frame_index, "timestamp_s": timestamp,
                                        "track_id": hand["track_id"], "side": hand["side"],
-                                       "from_state": previous, "to_state": hand["state"]})
+                                       "from_state": previous, "to_state": hand["state"],
+                                       "missing_reason": hand.get("missing_reason")})
                     previous_states[hand["track_id"]] = hand["state"]
                     base = {k: sample[k] for k in ["frame_index", "timestamp_s"]}
                     base.update({k: hand[k] for k in ["track_id", "state", "observed", "side", "handedness_score"]})
+                    base["missing_reason"] = hand.get("missing_reason")
                     for j in (range(21) if hand["image_xyz"] is not None else [-1]):
                         row = {**base, "landmark_index": j}
                         for key, columns in [
@@ -269,10 +271,12 @@ def process(args):
                             timestamp_s=np.array([r[1] for r in sample_rows]),
                             track_id=np.array([r[2]["track_id"] for r in sample_rows], dtype=np.int64),
                             state=np.array([r[2]["state"] for r in sample_rows], dtype="U12"),
+                            missing_reason=np.array([r[2].get("missing_reason") or "" for r in sample_rows], dtype="U16"),
                             observed=np.array([r[2]["observed"] for r in sample_rows], dtype=bool))
         peak_rss = max(peak_rss, rss.memory_info().rss)
         with (out/"tracking_events.csv").open("w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["frame_index", "timestamp_s", "track_id", "side", "from_state", "to_state"])
+            writer = csv.DictWriter(f, fieldnames=["frame_index", "timestamp_s", "track_id", "side", "from_state",
+                                                   "to_state", "missing_reason"])
             writer.writeheader()
             writer.writerows(events)
         stages["finalize"] = time.perf_counter() - finalize_start
@@ -302,7 +306,7 @@ def process(args):
         }
         (out/"metrics.json").write_text(json.dumps(metrics, indent=2)+"\n")
         manifest = {
-            "schema_version": "0.2", "created_utc": datetime.now(timezone.utc).isoformat(),
+            "schema_version": "0.3", "created_utc": datetime.now(timezone.utc).isoformat(),
             "source": {"name": source.name, "sha256": sha256(source),
                        "width": int(info["width"]), "height": int(info["height"]),
                        "fps": info["fps"], "cfr": info["cfr"], "total_frames": len(info["timestamps"]),

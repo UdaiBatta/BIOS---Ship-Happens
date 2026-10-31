@@ -39,6 +39,22 @@ def draw_hand(canvas, points, c, radius=4, predicted=False):
         cv2.circle(canvas, point, radius, c, -1, cv2.LINE_AA)
 
 
+STATE_LANE = {"observed": "observed", "reacquired": "observed", "predicted": "predicted", "lost": "lost"}
+
+
+def hand_label(hand) -> str:
+    """Short reliability label: id, displayed side with right-probability, state, missing reason.
+
+    p_R is the track's smoothed right-hand probability from the handedness classifier;
+    it is side confidence only, never landmark or detection quality.
+    """
+    p = hand.get("side_probability_right_smoothed")
+    side = f'{hand["side"]} p_R={p:.2f}' if p is not None else hand["side"]
+    state = hand["state"] + (" 2D-only" if hand["state"] == "predicted" else "")
+    reason = hand.get("missing_reason")
+    return f'#{hand["track_id"]} {side} {state}' + (f" ({reason})" if reason else "")
+
+
 def overlay(frame, hands):
     image = frame.copy()
     h, w = image.shape[:2]
@@ -47,9 +63,8 @@ def overlay(frame, hands):
             continue
         points = np.asarray(hand["image_xyz"])[:, :2] * [w, h]
         draw_hand(image, points, color(hand), max(2, w//300), not hand["observed"])
-        anchor = np.clip(points[0].astype(int), [0, 25], [w-250, h-10])
-        text(image, f'#{hand["track_id"]} {hand["side"]} {hand["state"]}',
-             int(anchor[0]), int(anchor[1]), .55, color(hand), 2)
+        anchor = np.clip(points[0].astype(int), [0, 25], [w-420, h-10])
+        text(image, hand_label(hand), int(anchor[0]), int(anchor[1]), .55, color(hand), 2)
     return image
 
 
@@ -96,11 +111,11 @@ def composite(frame, sample):
     for i, hand in enumerate(sample["hands"][:5]):
         x = 28 + i * 307
         cv2.circle(canvas, (x+6, 749), 6, color(hand), -1)
-        text(canvas, f'#{hand["track_id"]} {hand["side"]}: {hand["state"]}',
-             x+23, 756, .52, color(hand))
+        text(canvas, hand_label(hand), x+23, 756, .42, color(hand))
     if not sample["hands"]:
         text(canvas, "No active tracks", 28, 756, .55, MUTED)
-    text(canvas, "Solid = observed   Dashed gray = short 2D prediction   Lost = hidden", 28, 803, .55, MUTED)
+    text(canvas, "Solid = observed   Dashed gray = short 2D prediction   Lost = no coordinates   "
+                 "p_R = side probability (not landmark quality)", 28, 803, .5, MUTED)
     text(canvas, "Hand-relative 3D estimates. Factory position and camera motion are not reconstructed.",
          28, 864, .57, TEXT)
     return canvas
@@ -139,8 +154,8 @@ class RerunSink:
         self.quality = quality
         rr.init("egohand_twin", spawn=False)
         rr.save(str(path))
-        views = [rrb.Spatial2DView(origin="video", name="Source + 2D"),
-                 rrb.Spatial3DView(origin="hands", name="Hand-relative 3D; spacing arbitrary",
+        views = [rrb.Spatial2DView(origin="video", name="Source + 2D (normalized image coords)"),
+                 rrb.Spatial3DView(origin="hands", name="Hand-relative 3D (MediaPipe m, wrist-centred; spacing arbitrary)",
                                    eye_controls=rrb.EyeControls3D(
                                        kind=rrb.Eye3DKind.Orbital,
                                        position=(0., -.05, -.65),
@@ -148,10 +163,12 @@ class RerunSink:
                                    line_grid=False)]
         if lift is not None:
             views.append(rrb.Spatial3DView(
-                origin="camera_space", name=f"EXPERIMENTAL camera space ({lift['label']})",
+                origin="camera_space",
+                name=f"EXPERIMENTAL camera space (m; x right, y down, z forward; {lift['label']})",
                 eye_controls=rrb.EyeControls3D(kind=rrb.Eye3DKind.Orbital, position=(.6, -.6, -.5),
                                                look_target=(0., 0., .45), eye_up=(0., -1., 0.))))
-        bottom = [rrb.TextLogView(origin="reliability", name="Tracking events")]
+        bottom = [rrb.TimeSeriesView(origin="lanes", name="Track state lanes (y = track ID)"),
+                  rrb.TextLogView(origin="reliability", name="Tracking events")]
         if quality is not None:
             bottom = [rrb.TimeSeriesView(origin="quality/signals", name="Quality signals (heuristic)"),
                       rrb.TextLogView(origin="quality/queue", name="Review queue"), *bottom]
@@ -163,6 +180,7 @@ class RerunSink:
             row_shares=[3, 2] if quality is not None else [4, 1]),
             rrb.TimePanel(timeline="video_time"), collapse_panels=True))
         rr.log("hands", rr.ViewCoordinates.RDF, static=True)
+        self.lane_styles: set = set()
         for i, step in enumerate(steps or [], 1):
             # Human-authored markers on the same time base as the video (timestamp_s).
             status = f"signed off by {step['reviewer']}" if step["signed_off"] else "NOT signed off"
@@ -232,10 +250,31 @@ class RerunSink:
                 rr.log(root+"/joints", rr.Points3D(world, colors=c, radii=.003))
                 rr.log(root+"/bones", rr.LineStrips3D(
                     world[np.asarray(CONNECTIONS)], colors=c, radii=.0015))
+            self._log_lane(hand)
             if self.previous_states.get(key) != hand["state"]:
+                basis = hand.get("missing_reason_basis")
                 rr.log("reliability", rr.TextLog(
-                    f'#{key} {hand["side"]}: {hand["state"]}; 3D is hand-relative; spacing arbitrary'))
+                    hand_label(hand) + (f" - {basis}" if basis else "") +
+                    ("; 3D is hand-relative; spacing arbitrary" if hand["observed"] else ""),
+                    level="INFO" if hand["observed"] else "WARN"))
             self.previous_states[key] = hand["state"]
+
+    def _log_lane(self, hand):
+        """One horizontal lane per track (y = track ID). Points are coloured by state and,
+        when observed, by displayed side; gaps mean the track is retired or not yet created."""
+        rr = self.rr
+        state = STATE_LANE.get(hand["state"])
+        if state is None:
+            return
+        name = f'{state}_{hand["side"].lower()}' if state == "observed" else state
+        path = f'lanes/track_{hand["track_id"]}/{name}'
+        if path not in self.lane_styles:
+            colours = {"observed_left": (63, 216, 155), "observed_right": (255, 171, 66),
+                       "predicted": (145, 145, 145), "lost": (230, 70, 70)}
+            rr.log(path, rr.SeriesPoints(colors=colours[name], names=f'#{hand["track_id"]} {name}',
+                                         marker_sizes=2.), static=True)
+            self.lane_styles.add(path)
+        rr.log(path, rr.Scalars(float(hand["track_id"])))
 
     def close(self):
         self.rr.disconnect()

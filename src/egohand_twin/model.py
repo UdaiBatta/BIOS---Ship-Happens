@@ -19,6 +19,8 @@ COORDINATES = {
     "absolute_hand_translation": "unavailable",
     "camera_pose": "unavailable",
     "handedness_score": "classifier score for left/right; NOT landmark confidence",
+    "side_probability_right_smoothed": "running average of per-frame right-hand probability for the track; NOT landmark confidence",
+    "missing_reason": "non-observed tracks only: out_of_view (inferred from extrapolated wrist outside the image or last landmarks at the border) or unknown; null when observed",
 }
 
 

@@ -55,8 +55,31 @@ def right_probability(d: Detection):
     return d.handedness_score if d.side == "Right" else 1. - d.handedness_score
 
 
+EDGE_MARGIN = .02  # normalized image units
+
+
+def missing_reason(track: Track, age: float) -> tuple[str, str]:
+    """Explain why a track is not observed, using only evidence the tracker has.
+
+    Returns (reason, basis). ``out_of_view`` is inferred when the wrist extrapolated
+    from the last observation (velocity x min(age, 0.2 s)) lies outside the image, or
+    when the last observed landmarks touched the image border. Everything else is
+    ``unknown``: the tracker cannot tell occlusion, blur, a low detector score or
+    another person's hand apart, so it does not guess. This is an inference, not an
+    observation; it can be wrong when a hand at the border is simply missed.
+    """
+    xy = track.detection.image[:, :2]
+    extrapolated = xy[0] + track.velocity * min(age, .2)
+    if np.any(extrapolated < 0) or np.any(extrapolated > 1):
+        return "out_of_view", (f"extrapolated wrist ({extrapolated[0]:.3f}, {extrapolated[1]:.3f}) "
+                               "outside the image")
+    if np.any((xy < EDGE_MARGIN) | (xy > 1 - EDGE_MARGIN)):
+        return "out_of_view", "last observed landmarks touched the image border"
+    return "unknown", "no evidence separating occlusion, blur, low detector score or exit"
+
+
 def record(track: Track, state: str, age: float, detection=None, image=None, world=None):
-    return {
+    out = {
         "track_id": track.id,
         "state": state,
         "observed": detection is not None,
@@ -72,6 +95,13 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "image_xyz": image.tolist() if image is not None else None,
         "world_xyz_m": world.tolist() if world is not None else None,
     }
+    if detection is None:
+        reason, basis = missing_reason(track, age)
+        out["missing_reason"], out["missing_reason_basis"] = reason, basis
+        out["missing_reason_provenance"] = "inferred"
+    else:
+        out["missing_reason"] = out["missing_reason_basis"] = out["missing_reason_provenance"] = None
+    return out
 
 
 class IdentityTracker:

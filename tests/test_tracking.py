@@ -106,3 +106,29 @@ def test_diagonal_units_treat_pixels_isotropically():
     assert ids(IdentityTracker(frame_size=(1920, 1080)), 0., .15) == [1]
     # 288 px horizontal move is rejected in both unit systems.
     assert ids(IdentityTracker(frame_size=(1920, 1080)), .15, 0.) == [2]
+
+
+def test_missing_reason_out_of_view_unknown_and_observed():
+    tracker = IdentityTracker(smoothing=False)
+    # Hand moving right towards the border: extrapolated wrist leaves the image.
+    for i, x in enumerate([.90, .94, .975]):
+        hands = tracker.update([detection(x, .5)], i/30)
+    assert hands[0]["missing_reason"] is None and hands[0]["observed"]
+    gone = tracker.update([], 4/30)[0]
+    assert gone["state"] == "predicted" and gone["missing_reason"] == "out_of_view"
+    assert gone["missing_reason_provenance"] == "inferred" and "outside the image" in gone["missing_reason_basis"]
+    # Hand in the middle of the image that stops being detected: no evidence -> unknown.
+    tracker = IdentityTracker(smoothing=False)
+    tracker.update([detection(.4, .5)], 0.)
+    lost = tracker.update([], .3)[0]
+    assert lost["state"] == "lost" and lost["missing_reason"] == "unknown"
+    assert lost["image_xyz"] is None and lost["world_xyz_m"] is None
+
+
+def test_missing_reason_border_touch_without_motion():
+    tracker = IdentityTracker(smoothing=False)
+    d = detection(.5, .99)  # wrist at the bottom border, not moving
+    tracker.update([d], 0.)
+    rec = tracker.update([], .1)[0]
+    assert rec["missing_reason"] == "out_of_view"
+    assert "touched the image border" in rec["missing_reason_basis"]

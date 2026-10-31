@@ -11,7 +11,9 @@ Cancelling a running job is checked at every progress callback.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
+import socket
 import time
 import traceback
 
@@ -29,11 +31,19 @@ class Cancelled(Exception):
     pass
 
 
+WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
+
+
+def check_cancelled(run_id) -> None:
+    if Run.objects.filter(pk=run_id, status=Run.Status.CANCELLED).exists():
+        raise Cancelled()
+
+
 def claim_next() -> Run | None:
     """Atomically move the oldest queued run to running; None if nothing is queued."""
     for run in Run.objects.filter(status=Run.Status.QUEUED).order_by("created_at")[:5]:
         claimed = Run.objects.filter(pk=run.pk, status=Run.Status.QUEUED).update(
-            status=Run.Status.RUNNING, stage="starting", started_at=timezone.now(), progress=0.)
+            status=Run.Status.RUNNING, stage="starting", started_at=timezone.now(), progress=0., worker_id=WORKER_ID)
         if claimed:
             return Run.objects.get(pk=run.pk)
     return None
@@ -76,6 +86,7 @@ def execute(run: Run, process=None) -> None:
 
     args = process_args(build_process_argv(run, out_dir))
     metrics = process(args, progress=progress, workers=run.workers)
+    check_cancelled(run.pk)
     Run.objects.filter(pk=run.pk).update(stage="quality", progress=.9, metrics=metrics)
     summary = write_quality(out_dir, Path(run.video.path))
     Run.objects.filter(pk=run.pk).update(stage="indexing", progress=.97, quality_summary=summary)
@@ -86,8 +97,10 @@ def execute(run: Run, process=None) -> None:
     if settings.LIFT_HFOV:
         from egohand_twin.lift import lift_run
         lift_run(out_dir, settings.LIFT_HFOV)
+    check_cancelled(run.pk)
     index_path = build_frame_index(out_dir)
     build_tracks(out_dir)
+    check_cancelled(run.pk)
     Run.objects.filter(pk=run.pk).update(stage="proxy", progress=.98)
     import numpy as np
     with np.load(index_path) as index:
@@ -100,26 +113,58 @@ def execute(run: Run, process=None) -> None:
     (out_dir/"proxy.json").write_text(__import__("json").dumps(proxy))
 
 
-def run_one(run: Run, process=None) -> Run:
+def run_one(run: Run, process=None) -> Run | None:
+    """Execute one claimed run. Never raises: failures are recorded on the run.
+
+    Final status updates are conditional on the run still being 'running', so a cancel that
+    arrives during a late stage is never overwritten with 'complete' or 'failed'.
+    """
+    still_running = Run.objects.filter(pk=run.pk, status=Run.Status.RUNNING)
     try:
         execute(run, process)
-        Run.objects.filter(pk=run.pk).update(status=Run.Status.COMPLETE, stage="complete", progress=1.,
-                                             finished_at=timezone.now())
+        still_running.update(status=Run.Status.COMPLETE, stage="complete", progress=1., finished_at=timezone.now())
     except Cancelled:
-        Run.objects.filter(pk=run.pk).update(stage="cancelled", finished_at=timezone.now())
+        pass
     except Exception as error:  # record the failure on the run; the worker keeps going
         log.error("Run %s failed: %s", run.pk, traceback.format_exc())
-        Run.objects.filter(pk=run.pk).update(status=Run.Status.FAILED, stage="failed",
-                                             error=f"{type(error).__name__}: {error}"[:2000],
-                                             finished_at=timezone.now())
-    return Run.objects.get(pk=run.pk)
+        still_running.update(status=Run.Status.FAILED, stage="failed",
+                             error=f"{type(error).__name__}: {error}"[:2000], finished_at=timezone.now())
+    # Cancelled runs are finished once the worker has let go of them.
+    Run.objects.filter(pk=run.pk, status=Run.Status.CANCELLED, finished_at__isnull=True).update(
+        stage="cancelled", finished_at=timezone.now())
+    return Run.objects.filter(pk=run.pk).first()
+
+
+def _alive(worker_id: str) -> bool:
+    host, _, pid = worker_id.rpartition(":")
+    if host != socket.gethostname() or not pid.isdigit():
+        return True  # another machine (or unknown): never steal its run
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def recover_stale() -> int:
-    """Runs left 'running' by a crashed worker are marked failed (re-submit to retry)."""
-    return Run.objects.filter(status=Run.Status.RUNNING).update(
+    """Release runs whose worker process on THIS host no longer exists.
+
+    Running runs become 'failed' (re-submit to retry); cancelled runs the dead worker never
+    released are marked finished. Runs held by live workers, or by workers on other hosts,
+    are left alone, so starting a second worker with --recover cannot touch a live run.
+    """
+    now = timezone.now()
+    dead = [r for r in Run.objects.filter(status__in=[Run.Status.RUNNING, Run.Status.CANCELLED],
+                                          finished_at__isnull=True)
+            if not r.worker_id or not _alive(r.worker_id)]
+    failed = Run.objects.filter(pk__in=[r.pk for r in dead if r.status == Run.Status.RUNNING]).update(
         status=Run.Status.FAILED, stage="failed", error="Worker stopped before the run finished; re-submit.",
-        finished_at=timezone.now())
+        finished_at=now)
+    Run.objects.filter(pk__in=[r.pk for r in dead if r.status == Run.Status.CANCELLED]).update(
+        stage="cancelled", finished_at=now)
+    return failed
 
 
 def work_forever(poll_s: float = 1., once: bool = False) -> None:
@@ -132,6 +177,9 @@ def work_forever(poll_s: float = 1., once: bool = False) -> None:
             time.sleep(poll_s)
             continue
         log.info("Processing run %s (%s, preset %s)", run.pk, run.video.name, run.preset)
-        run_one(run)
+        try:
+            run_one(run)
+        except Exception:  # never let one run stop the worker loop
+            log.error("Unexpected error around run %s: %s", run.pk, traceback.format_exc())
         if once:
             return

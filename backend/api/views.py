@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from functools import wraps
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
@@ -50,7 +51,7 @@ def api(methods: tuple[str, ...]):
                 return JsonResponse({"error": str(error)}, status=error.status)
             except services.NotReady as error:
                 return JsonResponse({"error": f"not ready: {error}"}, status=409)
-            except (Video.DoesNotExist, Run.DoesNotExist, KeyError, FileNotFoundError) as error:
+            except (Video.DoesNotExist, Run.DoesNotExist, FileNotFoundError) as error:
                 return JsonResponse({"error": f"not found: {error}"}, status=404)
             except PermissionError as error:
                 return JsonResponse({"error": str(error)}, status=403)
@@ -179,19 +180,29 @@ def runs(request):
             qs = qs.filter(status=request.GET["status"])
         return {"runs": [r.as_dict() for r in qs[:200]]}
     data = body(request)
-    video = Video.objects.get(pk=data.get("video_id"))
+
+    def field(name, cast, default=None):
+        value = data.get(name, default)
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ApiError(f"{name} must be a number")
+        try:
+            return cast(value)
+        except (TypeError, ValueError):
+            raise ApiError(f"{name} must be a number")
+    video = Video.objects.get(pk=field("video_id", int))
     preset = data.get("preset", "recall")
     if preset not in PRESETS:
         raise ApiError(f"preset must be one of {sorted(PRESETS)}")
-    start = float(data.get("start_s", 0.))
-    duration = data.get("duration_s")
-    duration = float(duration) if duration is not None else None
-    if start < 0 or start >= video.duration_s + 1/video.fps:
+    start = field("start_s", float, 0.)
+    duration = field("duration_s", float)
+    if not math.isfinite(start) or start < 0 or start >= video.duration_s + 1/video.fps:
         raise ApiError("start_s outside the video")
-    if duration is not None and duration <= 0:
+    if duration is not None and (not math.isfinite(duration) or duration <= 0):
         raise ApiError("duration_s must be positive")
     # 2 detection processes measured identical to sequential and ~20% faster on a 4-vCPU host.
-    workers = int(data.get("workers", 2 if (os.cpu_count() or 1) >= 4 else 1))
+    workers = field("workers", int, 2 if (os.cpu_count() or 1) >= 4 else 1)
     if not 1 <= workers <= (os.cpu_count() or 1):
         raise ApiError(f"workers must be between 1 and {os.cpu_count()}")
     run = Run.objects.create(video=video, preset=preset, start_s=start, duration_s=duration, workers=workers,
@@ -204,8 +215,8 @@ def runs(request):
 def run_detail(request, run_id):
     run = Run.objects.select_related("video").get(pk=run_id)
     if request.method == "DELETE":
-        if run.status in (Run.Status.QUEUED, Run.Status.RUNNING):
-            raise ApiError("cancel the run before deleting it", 409)
+        if run.status in (Run.Status.QUEUED, Run.Status.RUNNING) or run.finished_at is None:
+            raise ApiError("the run is queued, running or still stopping; cancel it and wait until it has finished", 409)
         if run.out_dir and Path(run.out_dir).resolve().parent == settings.RUNS_DIR.resolve():
             shutil.rmtree(run.out_dir, ignore_errors=True)  # only directories this backend created
         run.delete()
@@ -217,9 +228,12 @@ def run_detail(request, run_id):
 
 @api(("POST",))
 def run_cancel(request, run_id):
-    updated = Run.objects.filter(pk=run_id, status__in=[Run.Status.QUEUED, Run.Status.RUNNING]).update(
-        status=Run.Status.CANCELLED)
-    if not updated:
+    from django.utils import timezone
+    queued = Run.objects.filter(pk=run_id, status=Run.Status.QUEUED).update(
+        status=Run.Status.CANCELLED, stage="cancelled", finished_at=timezone.now())
+    # A running run is released (finished_at set) by its worker at the next cancellation check.
+    running = Run.objects.filter(pk=run_id, status=Run.Status.RUNNING).update(status=Run.Status.CANCELLED)
+    if not queued and not running:
         raise ApiError("run is not queued or running", 409)
     return Run.objects.get(pk=run_id).as_dict()
 
@@ -244,7 +258,10 @@ def run_frames(request, run_id):
 @api(("GET",))
 def run_frame(request, run_id, frame_index: int):
     detail = request.GET.get("detail", "full")
-    return services.read_frame(run_dir(Run.objects.get(pk=run_id)), frame_index, detail)
+    try:
+        return services.read_frame(run_dir(Run.objects.get(pk=run_id)), frame_index, detail)
+    except KeyError:
+        raise ApiError(f"frame {frame_index} was not processed in this run", 404)
 
 
 @api(("GET",))
@@ -335,6 +352,10 @@ def ranged_file(path: Path, request, content_type: str):
         response["Accept-Ranges"] = "bytes"
         return response
     first, last = match.groups()
+    if first == "" and last == "":
+        response = HttpResponse(status=416)
+        response["Content-Range"] = f"bytes */{size}"
+        return response
     if first == "":
         start, end = max(0, size - int(last)), size - 1
     else:

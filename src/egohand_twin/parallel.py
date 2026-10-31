@@ -106,7 +106,10 @@ def plan_chunks(frame_indices: list[int], workers: int, overlap: int, lookahead:
         keep = chunk.tolist()
         warmup = frame_indices[max(0, position - overlap):position] if n else []
         end = position + len(chunk)
-        ahead = frame_indices[end:end + lookahead] if n < len(chunks) - 1 else []
+        # Lookahead never extends past the NEXT chunk, so the seam repair only ever compares
+        # two adjacent chunks (short chunks would otherwise reach chunks n+2, n+3, ...).
+        next_len = len(chunks[n + 1]) if n < len(chunks) - 1 else 0
+        ahead = frame_indices[end:end + min(lookahead, next_len)]
         plans.append({"chunk": n, "keep": keep, "warmup": list(warmup), "lookahead": list(ahead)})
         position = end
     return plans
@@ -135,7 +138,8 @@ def merge_chunks(results: list[dict], agree: int = 5) -> tuple[dict, list[dict]]
         frames = sorted(ahead)
         switch = None
         for j in range(len(frames) - agree + 1):
-            if all(same_detections(ahead[f], nxt["detections"][f]) for f in frames[j:j + agree]):
+            if all(f in nxt["detections"] and same_detections(ahead[f], nxt["detections"][f])
+                   for f in frames[j:j + agree]):
                 switch = j
                 break
         used_prev = frames if switch is None else frames[:switch]

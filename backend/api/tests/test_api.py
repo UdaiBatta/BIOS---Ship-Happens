@@ -224,6 +224,51 @@ class ApiTests(TestCase):
         self.assertEqual((image.status_code, image["Content-Type"]), (200, "image/jpeg"))
         self.assertEqual(self.client.get(f"/api/runs/{run_id}/compare.jpg?t=2.5").status_code, 404)  # no hand
 
+    def test_cancel_during_late_stage_is_not_overwritten_and_delete_waits(self):
+        video = self.post("/api/videos", {"path": str(self.video_path)}).json()
+        run_id = self.post("/api/runs", {"video_id": video["id"], "duration_s": 4}).json()["id"]
+        run = jobs.claim_next()
+
+        def cancel_at_end(args, progress=None, workers=1):
+            metrics = fake_process(args)
+            self.assertEqual(self.post(f"/api/runs/{run_id}/cancel", {}).json()["status"], "cancelled")
+            self.assertEqual(self.client.delete(f"/api/runs/{run_id}").status_code, 409)  # worker still holds it
+            return metrics
+        finished = jobs.run_one(run, process=cancel_at_end)
+        self.assertEqual((finished.status, finished.stage), ("cancelled", "cancelled"))
+        self.assertIsNotNone(finished.finished_at)
+        self.assertEqual(self.client.delete(f"/api/runs/{run_id}").status_code, 204)
+
+    def test_recover_only_touches_runs_of_dead_workers(self):
+        import os
+        import socket
+        video = self.post("/api/videos", {"path": str(self.video_path)}).json()
+        live = Run.objects.create(video_id=video["id"], status="running", worker_id=f"{socket.gethostname()}:{os.getpid()}")
+        dead = Run.objects.create(video_id=video["id"], status="running", worker_id=f"{socket.gethostname()}:999999")
+        remote = Run.objects.create(video_id=video["id"], status="running", worker_id="other-host:1")
+        self.assertEqual(jobs.recover_stale(), 1)
+        statuses = {r.pk: r.status for r in Run.objects.all()}
+        self.assertEqual((statuses[live.pk], statuses[dead.pk], statuses[remote.pk]), ("running", "failed", "running"))
+
+    def test_bad_inputs_are_json_400_and_ranges_are_not_gzipped(self):
+        video = self.post("/api/videos", {"path": str(self.video_path)}).json()
+        for payload in ({"video_id": "abc"}, {"video_id": video["id"], "start_s": ""},
+                        {"video_id": video["id"], "workers": "x"}, {"video_id": video["id"], "duration_s": "NaN"},
+                        {"video_id": video["id"], "workers": True}):
+            response = self.post("/api/runs", payload)
+            self.assertEqual(response.status_code, 400, payload)
+            self.assertIn("error", response.json())
+        run_id, _ = self.make_complete_run()
+        empty = self.client.get(f"/api/runs/{run_id}/proxy.mp4", HTTP_RANGE="bytes=-")
+        self.assertEqual(empty.status_code, 416)
+        ranged = self.client.get(f"/api/runs/{run_id}/proxy.mp4", HTTP_RANGE="bytes=0-99", HTTP_ACCEPT_ENCODING="gzip")
+        self.assertEqual(ranged.status_code, 206)
+        self.assertNotIn("Content-Encoding", ranged)
+        frames = self.client.get(f"/api/runs/{run_id}/frames", HTTP_ACCEPT_ENCODING="gzip")
+        self.assertEqual(frames["Content-Encoding"], "gzip")
+        self.assertEqual(self.client.get(f"/api/runs/{run_id}/frames/999").json()["error"],
+                         "frame 999 was not processed in this run")
+
     def test_failed_job_records_error(self):
         video = self.post("/api/videos", {"path": str(self.video_path)}).json()
         self.post("/api/runs", {"video_id": video["id"]})

@@ -5,6 +5,7 @@ import hmac
 
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
+from django.middleware.gzip import GZipMiddleware
 
 
 class CorsMiddleware:
@@ -42,3 +43,15 @@ class TokenAuthMiddleware:
             if not hmac.compare_digest(supplied.encode(), token.encode()):
                 return JsonResponse({"error": "unauthorized"}, status=401)
         return self.get_response(request)
+
+
+class TextGZipMiddleware(GZipMiddleware):
+    """Gzip JSON/text only. Media and binary files (MP4 byte ranges, JPEG, NPZ) are already
+    compressed, and gzip-encoding a 206 partial response would break HTTP Range semantics."""
+    COMPRESSIBLE = ("application/json", "text/", "application/javascript")
+
+    def process_response(self, request, response):
+        content_type = response.get("Content-Type", "")
+        if response.status_code == 206 or not content_type.startswith(self.COMPRESSIBLE):
+            return response
+        return super().process_response(request, response)

@@ -120,9 +120,9 @@ def evaluate_command(a):
 def quality_command(a):
     run, video = Path(a.run), Path(a.video)
     out = Path(a.out) if a.out else run/"quality"
-    summary = write_quality(run, video, out)
+    result = assess(run, video)
+    summary = write_quality(run, video, out, result=result)
     if a.labels:
-        result = assess(run, video)
         ev = evaluate(run, Path(a.labels), allow_provisional=a.allow_provisional, split=a.split)
         q = evaluate_quality(result["windows"], Path(a.labels), ev, a.split)
         (out/f"quality_eval_{a.split or 'all'}.json").write_text(json.dumps(q, indent=2)+"\n")
@@ -323,9 +323,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def process_args(argv: list[str]) -> argparse.Namespace:
-    """Parse and resolve 'process' options exactly as the command line does."""
-    args = build_parser().parse_args(["process", *argv])
-    return apply_preset(args)
+    """Parse and resolve 'process' options exactly as the command line does.
+
+    Raises ValueError (never SystemExit) so a long-running job worker survives bad options.
+    """
+    try:
+        args = build_parser().parse_args(["process", *argv])
+    except SystemExit as exit_:
+        raise ValueError(f"invalid process options: {' '.join(argv)}") from exit_
+    apply_preset(args)
+    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "workers", "max_crops", "crop_max_side"]:
+        value = getattr(args, name, None)
+        if value is not None and value <= 0:
+            raise ValueError(f"{name.replace('_', '-')} must be positive")
+    if args.start_seconds < 0:
+        raise ValueError("start-seconds must be nonnegative")
+    for name in ["detection_threshold", "presence_threshold", "tracking_threshold"]:
+        if not 0 <= getattr(args, name) <= 1:
+            raise ValueError(f"{name} must be between 0 and 1")
+    return args
 
 
 def main():

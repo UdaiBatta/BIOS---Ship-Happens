@@ -27,7 +27,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "django.middleware.gzip.GZipMiddleware",
+    "api.middleware.TextGZipMiddleware",
     "api.middleware.CorsMiddleware",
     "api.middleware.TokenAuthMiddleware",
     "django.middleware.common.CommonMiddleware",

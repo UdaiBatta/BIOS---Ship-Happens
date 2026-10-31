@@ -53,6 +53,7 @@ class Run(models.Model):
     progress = models.FloatField(default=0.)
     out_dir = models.CharField(max_length=1024, blank=True)
     error = models.TextField(blank=True)
+    worker_id = models.CharField(max_length=128, blank=True)  # "hostname:pid" of the worker processing it
     metrics = models.JSONField(null=True, blank=True)
     quality_summary = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

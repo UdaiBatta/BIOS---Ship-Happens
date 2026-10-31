@@ -346,8 +346,10 @@ def build_queue(windows: list[dict], cfg: QualityConfig) -> list[dict]:
     return items
 
 
-def write_quality(run: Path, video: Path, out: Path | None = None, cfg: QualityConfig | None = None) -> dict:
-    result = assess(run, video, cfg)
+def write_quality(run: Path, video: Path, out: Path | None = None, cfg: QualityConfig | None = None,
+                  result: dict | None = None) -> dict:
+    """Write quality outputs; pass ``result`` from assess() to avoid decoding the video twice."""
+    result = result if result is not None else assess(run, video, cfg)
     out = out or run/"quality"
     out.mkdir(parents=True, exist_ok=True)
     source = result["summary"]["source"]

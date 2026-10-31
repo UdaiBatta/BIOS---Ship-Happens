@@ -65,3 +65,23 @@ def test_precomputed_detector_reports_worker_latency():
     d = PrecomputedDetector({0.1: []}, {0.1: .05})
     assert d.reported_latency(.1, 1e-6) == .05
     assert d.reported_latency(.2, 1e-6) == 1e-6
+
+
+def test_lookahead_never_spans_beyond_the_next_chunk_and_merge_survives():
+    from egohand_twin.parallel import merge_chunks
+    plans = plan_chunks(list(range(20)), 4, overlap=2, lookahead=60)  # 5-frame chunks
+    assert [p["lookahead"] for p in plans] == [[5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19], []]
+    results = [{"chunk": p["chunk"], "detections": {f: [_det(.01*f + .001*p["chunk"])] for f in p["keep"]},
+                "lookahead": {f: [_det(.5)] for f in p["lookahead"]}} for p in plans]  # never agree
+    merged, seams = merge_chunks(results, agree=5)
+    assert sorted(merged) == list(range(20)) and not any(s["converged"] for s in seams)
+
+
+def test_process_args_raises_value_error_not_system_exit():
+    from egohand_twin.cli import process_args
+    with pytest.raises(ValueError):
+        process_args(["v.mp4", "--out", "o", "--preset", "nonsense"])
+    with pytest.raises(ValueError, match="workers"):
+        process_args(["v.mp4", "--out", "o", "--workers", "0"])
+    with pytest.raises(ValueError, match="detection_threshold"):
+        process_args(["v.mp4", "--out", "o", "--detection-threshold", "2"])

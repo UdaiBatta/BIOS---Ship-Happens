@@ -295,6 +295,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--split", help="Only score frames from this label split (e.g. dev or holdout)")
     p.add_argument("--conditions", help="conditions.json: exclude flagged frames (reported) and slice recall by condition")
     p.set_defaults(func=evaluate_command)
+    p = commands.add_parser("privacy", help="Candidate privacy flags (faces only, review assistance) -> RUN/privacy_flags.json")
+    p.add_argument("video")
+    p.add_argument("run")
+    p.add_argument("--every", type=float, default=1., help="Seconds between checked frames")
+    p.add_argument("--face-model", default="models/blaze_face_short_range.tflite")
+    p.set_defaults(func=lambda a: print(__import__("egohand_twin.privacy", fromlist=["x"]).write_privacy(
+        Path(a.video), Path(a.run), __import__("egohand_twin.privacy", fromlist=["x"]).fetch_face_model(Path(a.face_model)), a.every)))
     p = commands.add_parser("events", help="Inferred candidate motion events -> RUN/motion_events.json")
     p.add_argument("run")
     p.set_defaults(func=lambda a: print(__import__("egohand_twin.motion_events", fromlist=["x"]).write_events(Path(a.run))))

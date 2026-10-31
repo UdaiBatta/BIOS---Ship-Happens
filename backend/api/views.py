@@ -28,6 +28,9 @@ PRESETS = {
     "recall": {"description": "Thresholds 0.3 + centre-crop rescue; about 2x detector time",
                "measured": "holdout recall 39/78, precision 39/40 (provisional labels, one clip); "
                            "more track fragmentation"},
+    "accurate": {"description": "recall + a reverse-time detection pass; about 2x detector time",
+                 "measured": "holdout recall 46/78, precision 46/48 (provisional labels, one clip); "
+                             "dev 41/72 with no false positives"},
 }
 
 

@@ -215,3 +215,14 @@ uv run egohand replay $V runs/dev_chosen --out runs/dev_chosen/review.rrd --qual
 ```
 
 The bake-off scripts used for the tables are wrappers around these commands; the configuration names map to the flags in §2. Runs, labels and recordings stay in `data/` and `runs/`, which are git-ignored and private.
+
+## Reverse-time detection pass (`--preset accurate`, 31 Oct 2026)
+
+MediaPipe's landmark model sees one frame at a time; its VIDEO mode only carries the previous frame's hand region forward. Because runs are offline, a second detection pass runs **backwards in time** (bounded memory: 300-frame segments, each warmed up on the 30 frames after it), and hands it finds that the forward pass missed are added (forward results take precedence; duplicates by the landmark rule). Same host, same clip, provisional labels:
+
+| Split | recall (forward) | recall + backward pass | Precision | Notes |
+| --- | ---: | ---: | --- | --- |
+| dev (choice) | 36/72 | **41/72** | 36/36 → 41/41 | Identical with the full pipeline, 2 workers, converged seam |
+| holdout (once) | 39/78 | **46/78** | 39/40 → 46/48 | full 27/46 → 34/46; truncated unchanged 7/23 |
+
+Cost: detector time about doubles (30 s of 1080p: 101 s end to end with 2 workers on 4 vCPUs). It does not help hands cut off at the bottom edge. The default stays `baseline`; the viewer's default stays `recall`.

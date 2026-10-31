@@ -43,8 +43,8 @@
     <button class="btn" id="bkRefresh" title="Refresh the run list">↻</button>
     <span class="sep"></span>
     <select class="btn" id="bkVideo" aria-label="Registered video"></select>
-    <select class="btn" id="bkPreset" aria-label="Preset" title="recall: thresholds 0.3 + centre-crop rescue (chosen on dev, provisional labels). baseline: MediaPipe defaults.">
-      <option value="recall" selected>recall</option><option value="baseline">baseline</option></select>
+    <select class="btn" id="bkPreset" aria-label="Preset" title="recall: thresholds 0.3 + centre-crop rescue (chosen on dev, provisional labels). accurate: recall + a reverse-time pass, finds more hands, about 2x slower. baseline: MediaPipe defaults.">
+      <option value="recall" selected>recall</option><option value="accurate">accurate (slower)</option><option value="baseline">baseline</option></select>
     <label class="note">start <input id="bkStart" type="number" value="0" min="0" step="1" style="width: 4.5em"> s</label>
     <label class="note">length <input id="bkDur" type="number" value="30" min="1" step="1" style="width: 4.5em"> s</label>
     <button class="btn" id="bkProcess" title="Queue a processing run on the local worker">Process</button>

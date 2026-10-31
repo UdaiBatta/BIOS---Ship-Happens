@@ -17,6 +17,7 @@ Measured on one clip (one of four recording families) with **provisional labels*
 | --- | --- |
 | Landmarks, tracking (observed / predicted 2D-only / lost / retired), raw + filtered exports, Rerun replay | Implemented, verified on real footage |
 | Detection recovery, `--preset recall` (thresholds 0.3 + centre-crop rescue) | Holdout visible-hand recall 19/78 → 39/78, precision 39/40; more track fragmentation (2.17 vs 1.60 IDs per hand) |
+| `--preset accurate` (recall + a reverse-time detection pass) | Holdout recall 39/78 → 46/78, precision 46/48; dev 36/72 → 41/72 with no false positives; about 2× detector time; no gain on hands cut off at the bottom edge |
 | Quality windows, review queue, segment export, Rerun quality timeline | Implemented; heuristic. Flags catch 22/35 missed-hand frames on holdout; about 12 review items per minute |
 | Reliability in replay: state lanes, side probability, `missing_reason`, units | Implemented; `out_of_view` contradicted in 6/15 holdout cases, so treat it as a hint |
 | Same-moment flat-vs-3D image, `steps.json` step markers with sign-off | Implemented; whether 3D helps users is **not measured** |

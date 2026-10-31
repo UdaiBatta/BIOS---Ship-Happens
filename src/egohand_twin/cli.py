@@ -32,6 +32,9 @@ from .render import fit_image, text, rebuild_replay
 PRESETS = {
     "baseline": {"detection_threshold": .5, "presence_threshold": .5, "tracking_threshold": .5, "rescue_crop": False},
     "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True},
+    # recall + a second, reverse-time detection pass (offline only; about 2x detector time).
+    "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True,
+                 "bidirectional": True},
 }
 
 
@@ -219,7 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retain-seconds", type=float, default=.8)
     p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",
                    help="baseline: MediaPipe defaults (historical B0). recall: thresholds 0.3 + centre-crop rescue, "
-                        "chosen on dev labels and confirmed once on holdout (provisional labels). Explicit flags override.")
+                        "chosen on dev labels and confirmed once on holdout (provisional labels). accurate: recall + a reverse-time "
+                        "pass (about 2x detector time). Explicit flags override.")
+    p.add_argument("--bidirectional", action="store_true", default=None,
+                   help="Also run detection backwards in time and add hands the forward pass missed "
+                        "(offline; about 2x detector time; part of --preset accurate)")
     p.add_argument("--detection-threshold", type=float)
     p.add_argument("--presence-threshold", type=float)
     p.add_argument("--tracking-threshold", type=float)

@@ -35,6 +35,8 @@ def parse_intervals(text: str) -> list[tuple[float, float]]:
         if not 0 <= start < end:
             raise ValueError("Intervals must be start:end seconds with 0 <= start < end")
         intervals.append((start, end))
+    if any(start < prev_end for (_, prev_end), (start, _) in zip(sorted(intervals), sorted(intervals)[1:])):
+        raise ValueError("Annotation intervals must not overlap")
     return intervals
 
 
@@ -60,6 +62,11 @@ def grid(image: np.ndarray, step: float = .05) -> np.ndarray:
 def make_annotation_set(video: Path, out: Path, timestamps: list[float],
                         intervals: list[tuple[float, float]], step_frames: int, split: str,
                         tile_width: int = 960) -> dict:
+    intervals = sorted(intervals)
+    if any(start < 0 or start >= end for start, end in intervals):
+        raise ValueError("Intervals must be start:end seconds with 0 <= start < end")
+    if any(start < prev_end for (_, prev_end), (start, _) in zip(intervals, intervals[1:])):
+        raise ValueError("Annotation intervals must not overlap")
     if out.exists() and any(out.iterdir()):
         raise ValueError("Choose an empty annotation output directory")
     relative = np.asarray(timestamps) - timestamps[0]
@@ -228,43 +235,64 @@ def apply_label_review(labels: Path, review_csv: Path, reviewer: str, out: Path)
         raise ValueError("reviewer initials are required")
     data = json.loads(Path(labels).read_text())
     by_key = {(f["frame_index"], h["gt_id"]): h for f in data["frames"] for h in f["hands"]}
+    expected = {(f["frame_index"], h["gt_id"]) for f in data["frames"] for h in f["hands"]}
+    expected.update((f["frame_index"], "") for f in data["frames"] if not f["hands"])
+    with Path(review_csv).open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    seen = set()
+    for row in rows:
+        try:
+            key = (int(row["frame_index"]), row["gt_id"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Review CSV contains an invalid frame or hand row") from None
+        if key not in expected:
+            raise ValueError(f"review row for unknown hand {key[0]}/{key[1]}")
+        if key in seen:
+            raise ValueError(f"duplicate review row {key[0]}/{key[1]}")
+        seen.add(key)
+    missing = expected - seen
+    if missing:
+        frame_index, gt_id = sorted(missing)[0]
+        raise ValueError(f"missing review row {frame_index}/{gt_id}")
     open_items, counts = [], {d: 0 for d in DECISIONS}
     deletions = set()
-    with Path(review_csv).open() as f:
-        for row in csv.DictReader(f):
-            frame_index = int(row["frame_index"])
-            if row.get("missing_hand_note", "").strip():
-                open_items.append(f"frame {frame_index}: missing hand reported: {row['missing_hand_note'].strip()}")
-            if not row["gt_id"]:
-                continue
-            decision = row["decision"].strip().lower()
-            hand = by_key.get((frame_index, row["gt_id"]))
-            if hand is None:
-                raise ValueError(f"review row for unknown hand {frame_index}/{row['gt_id']}")
-            if decision not in DECISIONS:
-                open_items.append(f"frame {frame_index} {row['gt_id']}: no decision")
-                continue
-            counts[decision] += 1
-            if decision == "unsure":
-                open_items.append(f"frame {frame_index} {row['gt_id']}: marked unsure")
-            elif decision == "delete":
-                deletions.add((frame_index, row["gt_id"]))
-            elif decision == "fix":
-                side, vis = row["corrected_side"].strip(), row["corrected_visibility"].strip()
-                if side and side not in SIDES:
-                    raise ValueError(f"frame {frame_index} {row['gt_id']}: corrected_side must be one of {SIDES}")
-                if vis and vis not in VISIBILITY:
-                    raise ValueError(f"frame {frame_index} {row['gt_id']}: corrected_visibility must be one of {VISIBILITY}")
-                hand["side"] = side or hand["side"]
-                hand["visibility"] = vis or hand["visibility"]
-                if row["corrected_wrist_x"].strip() and row["corrected_wrist_y"].strip():
-                    xy = [float(row["corrected_wrist_x"]), float(row["corrected_wrist_y"])]
-                    if not all(-.25 <= v <= 1.25 for v in xy):
-                        raise ValueError(f"frame {frame_index} {row['gt_id']}: corrected wrist must be normalized")
-                    hand["wrist_xy"] = xy
-                    hand["wrist_in_frame"] = all(0 <= v <= 1 for v in xy)
-            if row["reviewer_note"].strip():
-                hand.setdefault("review_note", row["reviewer_note"].strip())
+    for row in rows:
+        frame_index = int(row["frame_index"])
+        if row.get("missing_hand_note", "").strip():
+            open_items.append(f"frame {frame_index}: missing hand reported: {row['missing_hand_note'].strip()}")
+        if not row["gt_id"]:
+            if row["decision"].strip().lower() not in ("", "ok"):
+                raise ValueError(f"frame {frame_index}: no-hand row decision must be empty or ok")
+            continue
+        decision = row["decision"].strip().lower()
+        hand = by_key[(frame_index, row["gt_id"])]
+        if decision not in DECISIONS:
+            open_items.append(f"frame {frame_index} {row['gt_id']}: no decision")
+            continue
+        counts[decision] += 1
+        if decision == "unsure":
+            open_items.append(f"frame {frame_index} {row['gt_id']}: marked unsure")
+        elif decision == "delete":
+            deletions.add((frame_index, row["gt_id"]))
+        elif decision == "fix":
+            side, vis = row["corrected_side"].strip(), row["corrected_visibility"].strip()
+            if side and side not in SIDES:
+                raise ValueError(f"frame {frame_index} {row['gt_id']}: corrected_side must be one of {SIDES}")
+            if vis and vis not in VISIBILITY:
+                raise ValueError(f"frame {frame_index} {row['gt_id']}: corrected_visibility must be one of {VISIBILITY}")
+            hand["side"] = side or hand["side"]
+            hand["visibility"] = vis or hand["visibility"]
+            x, y = row["corrected_wrist_x"].strip(), row["corrected_wrist_y"].strip()
+            if bool(x) != bool(y):
+                raise ValueError(f"frame {frame_index} {row['gt_id']}: both corrected wrist coordinates are required")
+            if x and y:
+                xy = [float(x), float(y)]
+                if not all(-.25 <= v <= 1.25 for v in xy):
+                    raise ValueError(f"frame {frame_index} {row['gt_id']}: corrected wrist must be normalized")
+                hand["wrist_xy"] = xy
+                hand["wrist_in_frame"] = all(0 <= v <= 1 for v in xy)
+        if row["reviewer_note"].strip():
+            hand.setdefault("review_note", row["reviewer_note"].strip())
     for frame in data["frames"]:
         frame["hands"] = [h for h in frame["hands"] if (frame["frame_index"], h["gt_id"]) not in deletions]
     complete = not open_items

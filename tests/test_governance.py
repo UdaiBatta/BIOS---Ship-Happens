@@ -1,6 +1,7 @@
 import argparse
 from datetime import date
 import json
+from pathlib import Path
 
 import pytest
 
@@ -79,7 +80,7 @@ def test_retention_report_never_deletes(tmp_path):
     run("expired", {"status": "recorded", "retention_until": "2026-10-01"})
     run("ok", {"status": "recorded", "retention_until": "2026-11-02"})
     run("open", {"status": "recorded", "retention_until": None})
-    rows = {r["run"].split("/")[-1]: r["status"] for r in retention_report(tmp_path, TODAY)}
+    rows = {Path(r["run"]).name: r["status"] for r in retention_report(tmp_path, TODAY)}
     assert rows == {"old": "governance_not_recorded", "expired": "past_retention_review_deletion",
                     "ok": "within_retention", "open": "no_retention_date"}
     assert all((tmp_path/n/"manifest.json").exists() for n in rows)

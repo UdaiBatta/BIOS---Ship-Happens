@@ -118,6 +118,10 @@ def bone_lengths(points: np.ndarray) -> np.ndarray:
 def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: float = 25.) -> dict:
     if not (run/"COMPLETE").exists():
         raise ValueError("Run is incomplete")
+    tag = tag or f"hfov{int(round(hfov_deg))}"
+    arrays_path, summary_path = run/f"lift_{tag}.npz", run/f"lift_{tag}.json"
+    if arrays_path.exists() or summary_path.exists():
+        raise ValueError(f"lift_{tag} output exists; never overwritten")
     manifest = json.loads((run/"manifest.json").read_text())
     camera = EquidistantFisheye(int(manifest["source"]["width"]), int(manifest["source"]["height"]), hfov_deg)
     rows, reasons = [], {}
@@ -140,8 +144,7 @@ def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: 
     for i, (_, _, _, r) in enumerate(rows):
         if r["ok"]:
             joints[i], root[i], rmse[i] = r["joints_cam_m"], r["t_cam_m"], r["reproj_rmse_px"]
-    tag = tag or f"hfov{int(round(hfov_deg))}"
-    np.savez_compressed(run/f"lift_{tag}.npz", joints_cam_m=joints, hand_center_cam_m=root,
+    np.savez_compressed(arrays_path, joints_cam_m=joints, hand_center_cam_m=root,
                         reproj_rmse_px=rmse,
                         frame_index=np.array([r[0] for r in rows], np.int64),
                         timestamp_s=np.array([r[1] for r in rows]),
@@ -175,7 +178,7 @@ def lift_run(run: Path, hfov_deg: float, tag: str | None = None, max_reproj_px: 
                   "0.2-0.9 m is a heuristic sanity band, not a correctness criterion.",
                   "Camera coordinates only; no factory/world frame or camera motion compensation."],
     }
-    (run/f"lift_{tag}.json").write_text(json.dumps(summary, indent=2)+"\n")
+    summary_path.write_text(json.dumps(summary, indent=2)+"\n")
     return summary
 
 

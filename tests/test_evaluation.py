@@ -149,6 +149,20 @@ def test_offline_track_vote_reported_and_unknown_not_forced(tmp_path):
     assert vote["accuracy_as_labeled"]["k"] == 1 and vote["confusion"]["wearer_right->unknown"] == 1
 
 
+def test_foreign_identity_votes_are_rejected(tmp_path):
+    from egohand_twin.identity import write_identity
+    _v2_run(tmp_path, [{"frame_index": i, "timestamp_s": i/30,
+                        "hands": [_hand(1, .2, .5, "Left") | {"handedness_score": .9}]}
+                       for i in range(3)])
+    write_identity(tmp_path)
+    with (tmp_path/"landmarks.jsonl").open("a") as source:
+        source.write("\n")
+    labels = _labels(tmp_path, [{"frame_index": 0, "split": "dev", "complete": True, "hands": [
+        {"gt_id": "left", "side": "wearer_left", "wrist_xy": [.2, .5], "visibility": "full"}]}], reviewed=True)
+    with pytest.raises(ValueError, match="landmarks_sha256 binding"):
+        evaluate(tmp_path, labels)
+
+
 def test_missing_reason_claims_checked_against_undetected_labeled_hands(tmp_path):
     out = {"track_id": 1, "observed": False, "state": "lost", "side": "Left",
            "missing_reason": "out_of_view", "image_xyz_raw": None}

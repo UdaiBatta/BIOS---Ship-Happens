@@ -107,16 +107,16 @@ def image_signals(video: Path, frame_indices: list[int], analysis_width: int = 3
             if not ok:
                 raise ValueError("Video ended before all processed frames were analysed")
             index += 1
-            if index not in wanted and index + 1 not in wanted:
-                previous = None
+            if index not in wanted:
                 continue
             ok, frame = cap.retrieve()
             gray, stats = frame_stats(frame, analysis_width)
             if index in wanted:
                 motion = None
                 if previous is not None:
-                    (dx, dy), _ = cv2.phaseCorrelate(previous.astype(np.float32), gray.astype(np.float32))
-                    motion = float(np.hypot(dx, dy))/analysis_width
+                    if np.ptp(previous) > 0 and np.ptp(gray) > 0:
+                        (dx, dy), _ = cv2.phaseCorrelate(previous.astype(np.float32), gray.astype(np.float32))
+                        motion = float(np.hypot(dx, dy))/analysis_width
                 out[index] = {**{k: v for k, v in stats.items() if k != "mean_luma"},
                               "camera_shift_width_fraction": motion}
             previous = gray
@@ -239,7 +239,8 @@ def assess(run: Path, video: Path, cfg: QualityConfig | None = None) -> dict:
                     "edge_frame_fraction_of_observed": round(edge_frames/observed_frames, 3) if observed_frames else None,
                     "max_track_median_bone_cv": round(bone_cv, 3) if bone_cv is not None else None,
                     "median_blur_laplacian_var": round(blur, 1),
-                    "blur_relative_to_clip_median": round(blur/clip_blur, 3), "median_overexposed_fraction": round(over, 3),
+                    "blur_relative_to_clip_median": round(blur/clip_blur, 3) if clip_blur else None,
+                    "median_overexposed_fraction": round(over, 3),
                     "median_underexposed_fraction": round(under, 3),
                     "median_camera_motion_rate": round(motion, 3) if motion is not None else None}
         reasons = []
@@ -258,7 +259,7 @@ def assess(run: Path, video: Path, cfg: QualityConfig | None = None) -> dict:
                 reasons.append("hand_at_image_edge")
             if bone_cv is not None and bone_cv > cfg.bone_cv_max:
                 reasons.append("bone_length_inconsistency")
-        if blur < cfg.blur_relative_to_clip_median_max*clip_blur:
+        if clip_blur and blur < cfg.blur_relative_to_clip_median_max*clip_blur:
             reasons.append("blur")
         if over > cfg.overexposed_fraction_max:
             reasons.append("overexposure")
@@ -440,6 +441,13 @@ def export_segments(run: Path, out: Path, status: str = "suitable", quality_dir:
     quality_dir = quality_dir or run/"quality"
     queue = json.loads((quality_dir/"review_queue.json").read_text())
     summary = json.loads((quality_dir/"quality_summary.json").read_text())
+    manifest = (run/"manifest.json").read_bytes()
+    run_id = hashlib.sha256(manifest).hexdigest()[:12]
+    source_hash = json.loads(manifest)["source"]["sha256"]
+    if (summary["source"]["sha256"] != source_hash or
+            summary["run"]["manifest_sha256_12"] != run_id or
+            any(q["source_sha256"] != source_hash or q["run_id"] != run_id for q in queue)):
+        raise ValueError("Quality directory does not match this run")
     items = [q for q in queue if q["status"] == status]
     if out.exists() and any(out.iterdir()):
         raise ValueError("Choose an empty export directory")

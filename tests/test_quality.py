@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from egohand_twin.model import sha256
-from egohand_twin.quality import QualityConfig, assess, evaluate_quality, export_segments, write_quality
+from egohand_twin.quality import QualityConfig, assess, evaluate_quality, export_segments, image_signals, write_quality
 
 FPS = 30
 
@@ -98,6 +98,64 @@ def test_segment_export_copies_records_unchanged(tmp_path):
     exported = (tmp_path/"export"/manifest["segments"][0]["file"]).read_text().splitlines()
     original = (run/"landmarks.jsonl").read_text().splitlines()[:30]
     assert [json.loads(a) for a in exported] == [json.loads(b) for b in original]
+
+
+def test_export_rejects_quality_from_another_run_before_writing(tmp_path):
+    (tmp_path/"a").mkdir()
+    (tmp_path/"b").mkdir()
+    run_a, video_a = make_run(tmp_path/"a", lambda i: [(1, .4, .6)])
+    run_b, video_b = make_run(tmp_path/"b", lambda i: [(1, .4, .6)])
+    manifest_b = json.loads((run_b/"manifest.json").read_text())
+    manifest_b["parameters"]["different_run"] = True
+    (run_b/"manifest.json").write_text(json.dumps(manifest_b))
+    quality_dir = tmp_path/"quality-a"
+    write_quality(run_a, video_a, quality_dir)
+    out = tmp_path/"wrong-export"
+    try:
+        export_segments(run_b, out, quality_dir=quality_dir)
+    except ValueError as error:
+        assert "does not match" in str(error)
+    else:
+        raise AssertionError("expected mismatched quality run to be rejected")
+    assert not out.exists()
+
+
+def test_zero_clip_blur_has_unavailable_relative_ratio(tmp_path, monkeypatch):
+    import egohand_twin.quality as quality
+
+    run, video = make_run(tmp_path, lambda i: [(1, .4, .6)])
+    monkeypatch.setattr(quality, "image_signals", lambda _video, indices, _width: {
+        i: {"blur_laplacian_var": 0., "overexposed_fraction": 0., "underexposed_fraction": 0.,
+            "camera_shift_width_fraction": None} for i in indices})
+    result = assess(run, video)
+    assert all(w["evidence"]["blur_relative_to_clip_median"] is None for w in result["windows"])
+    assert all("blur" not in w["reasons"] for w in result["windows"])
+
+
+def test_strided_camera_motion_spans_requested_frames(tmp_path, monkeypatch):
+    video = tmp_path/"stride.avi"
+    writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"MJPG"), FPS, (32, 18))
+    for i in range(4):
+        writer.write(np.full((18, 32, 3), i*50, np.uint8))
+    writer.release()
+    calls = []
+    monkeypatch.setattr("egohand_twin.quality.frame_stats", lambda frame, _width: (
+        np.arange(4, dtype=np.uint8).reshape(2, 2) + int(frame[0, 0, 0]),
+        {"blur_laplacian_var": 1., "mean_luma": 0., "overexposed_fraction": 0., "underexposed_fraction": 0.}))
+    monkeypatch.setattr("egohand_twin.quality.cv2.phaseCorrelate",
+                        lambda previous, current: (calls.append((float(previous.mean()), float(current.mean()))) or ((0., 0.), 1.)))
+    image_signals(video, [0, 3], 32)
+    assert len(calls) == 1 and calls[0][1] - calls[0][0] > 100
+
+
+def test_constant_clip_has_no_camera_motion_evidence(tmp_path):
+    video = tmp_path/"constant.avi"
+    writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"MJPG"), FPS, (32, 18))
+    for _ in range(3):
+        writer.write(np.full((18, 32, 3), 100, np.uint8))
+    writer.release()
+    signals = image_signals(video, [0, 1, 2], 32)
+    assert all(row["camera_shift_width_fraction"] is None for row in signals.values())
 
 
 def test_quality_flags_scored_against_labeled_frames(tmp_path):

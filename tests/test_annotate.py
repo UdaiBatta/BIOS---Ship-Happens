@@ -11,6 +11,8 @@ def test_parse_intervals_validates():
     assert parse_intervals("0:12,60:72") == [(0., 12.), (60., 72.)]
     with pytest.raises(ValueError):
         parse_intervals("5:2")
+    with pytest.raises(ValueError, match="overlap"):
+        parse_intervals("0:3,2:4")
 
 
 def test_annotation_set_keeps_split_and_source_frame_indices(tmp_path):
@@ -29,6 +31,13 @@ def test_annotation_set_keeps_split_and_source_frame_indices(tmp_path):
     saved = json.loads((tmp_path/"out"/"labels.template.json").read_text())
     assert saved["frames"][0]["timestamp_s"] == pytest.approx(1.0)
     assert (tmp_path/"out"/"frames"/"frame_000025.jpg").exists()
+
+
+def test_annotation_api_rejects_overlap_before_creating_output(tmp_path):
+    out = tmp_path/"overlap"
+    with pytest.raises(ValueError, match="overlap"):
+        make_annotation_set(_video(tmp_path), out, [i/10 for i in range(8)], [(0., .5), (.4, .8)], 1, "dev")
+    assert not out.exists()
 
 
 def _labels_file(tmp_path):
@@ -96,3 +105,30 @@ def test_incomplete_or_invalid_review_stays_provisional(tmp_path):
         apply_label_review(labels, csv_path, "UB", tmp_path/"r2.json")
     with pytest.raises(ValueError, match="never overwritten"):
         apply_label_review(labels, csv_path, "UB", tmp_path/"r.json")
+
+
+@pytest.mark.parametrize("edit,match", [
+    (lambda rows: rows.pop(), "missing review row"),
+    (lambda rows: rows.append(rows[0].copy()), "duplicate review row"),
+    (lambda rows: rows.__setitem__(0, {**rows[0], "gt_id": "unknown"}), "unknown hand"),
+    (lambda rows: rows.__setitem__(0, {**rows[0], "decision": "fix", "corrected_wrist_x": ".4"}),
+     "both corrected wrist coordinates"),
+])
+def test_review_csv_must_have_complete_unambiguous_rows(tmp_path, edit, match):
+    import csv
+    from egohand_twin.annotate import apply_label_review, label_review_pack
+
+    labels = _labels_file(tmp_path)
+    label_review_pack(_video(tmp_path), labels, tmp_path/"review")
+    csv_path = tmp_path/"review"/"review.csv"
+    rows = list(csv.DictReader(csv_path.open()))
+    for row in rows:
+        row["decision"] = "ok"
+    edit(rows)
+    with csv_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    with pytest.raises(ValueError, match=match):
+        apply_label_review(labels, csv_path, "UB", tmp_path/"reviewed.json")
+    assert not (tmp_path/"reviewed.json").exists()

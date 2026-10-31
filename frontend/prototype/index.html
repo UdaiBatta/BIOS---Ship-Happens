@@ -305,6 +305,7 @@ const S = {
   lanes: null, series: null, events: [], eventFilter: 'all', breakdown: null,
   orbit: { yaw: -0.12, pitch: 0.62, dist: 0.9 }, video: null, dirty: true,
   camera: { ...DEFAULT_CAMERA }, lift: null, liftSummaries: new Map(), sideSource: null,
+  landmarksSha256: null,
   mesh: null, display: 'both', meshCoverage: null,
 };
 
@@ -1205,6 +1206,8 @@ function updateThreeBadge() { $('threeBadge').textContent = threeBadgeText(); }
 // sides that were unavailable (tracker fallback or unknown); sides already established by the file are kept;
 // an "unknown" vote leaves the tracker fallback in place.
 function applyIdentity(obj) {
+  if (!obj.landmarks_sha256 || obj.landmarks_sha256 !== S.landmarksSha256)
+    throw new Error('identity.json is not bound to the exact landmarks.jsonl loaded (or has no checksum)');
   const runTracks = new Set(S.frames.flatMap((f) => f.hands.map((h) => String(h.track_id))));
   if (!Object.keys(obj.tracks).some((t) => runTracks.has(t))) throw new Error('none of its tracks are in the loaded run');
   const map = { Right: 'wearer_right', Left: 'wearer_left' };
@@ -1358,6 +1361,7 @@ function loadFrames(frames, { synthetic, clipId }) {
   S.frames = frames; S.synthetic = synthetic; S.clipId = clipId; S.idx = 0; S.t = 0;
   S.camera = synthetic ? { ...DEFAULT_CAMERA } : null;   // real runs: lens unknown until lift metadata is loaded
   S.lift = null; S.liftSummaries = new Map(); S.sideSource = null;
+  S.landmarksSha256 = null;
   $('fileResults').disabled = synthetic; $('lblResults').classList.toggle('disabled', synthetic);
   $('lblResults').setAttribute('aria-disabled', String(synthetic));
   updateVideoBadge();
@@ -1402,11 +1406,18 @@ function parseJsonl(text) {
   out.sort((a, b) => a.timestamp_s - b.timestamp_s);
   return { out, bad, rule };
 }
+async function landmarksSha256(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 $('fileJsonl').addEventListener('change', async (ev) => {
   const file = ev.target.files[0]; if (!file) return;
-  const { out, bad, rule } = parseJsonl(await file.text());
+  const bytes = await file.arrayBuffer(), text = new TextDecoder().decode(bytes);
+  const checksum = await landmarksSha256(bytes);
+  const { out, bad, rule } = parseJsonl(text);
   if (!out.length) { toast('No valid frame records found in that file.'); return; }
   loadFrames(out, { synthetic: false, clipId: file.name.replace(/(_landmarks)?\.(jsonl|json|txt)$/i, '') });
+  S.landmarksSha256 = checksum;
   const msgs = [];
   if (bad) msgs.push(`${bad} lines skipped (not valid frame records)`);
   if (rule) msgs.push(`${rule} predicted/lost hands carried 3D. That breaks the schema rule, so they are shown as 2D only.`);

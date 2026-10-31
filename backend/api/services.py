@@ -34,16 +34,36 @@ class NotReady(Exception):
     """The run has not produced the requested artefact (yet)."""
 
 
+class SourceChanged(Exception):
+    """A registered source file no longer matches the metadata and caches."""
+
+
 # --------------------------------------------------------------------------- files
 def allowed_media_path(path: str | Path) -> Path:
-    """Resolve ``path`` and refuse anything outside EGOHAND_MEDIA_ROOTS (no traversal)."""
+    """Resolve media paths under configured roots or the dedicated upload directory."""
     resolved = Path(path).expanduser().resolve()
-    for root in settings.MEDIA_ROOTS:
+    for root in [*settings.MEDIA_ROOTS, settings.UPLOAD_DIR.resolve()]:
         if resolved == root or root in resolved.parents:
             if not resolved.is_file():
                 raise FileNotFoundError(f"Not a file: {resolved.name}")
             return resolved
     raise PermissionError("Path is outside the allowed media folders (EGOHAND_MEDIA_ROOTS)")
+
+
+def assert_video_unchanged(video) -> None:
+    from egohand_twin.model import sha256
+    path = Path(video.path)
+    fingerprint = _stamp(path)
+    key = f"source-sha:{path}"
+    verified = cache.get(key)
+    if verified is not None and verified[0] == fingerprint:
+        source_sha = verified[1]
+    else:
+        source_sha = sha256(path)
+        # Local media is treated as stable while size and mtime_ns stay unchanged.
+        cache.set(key, (fingerprint, source_sha), timeout=None)
+    if source_sha != video.sha256:
+        raise SourceChanged("registered source video changed; restore it or register the replacement at a new path")
 
 
 def _stamp(path: Path) -> tuple:
@@ -239,19 +259,18 @@ def video_timestamps(video) -> np.ndarray:
     return value
 
 
-def build_proxy(video_path: Path, out: Path, start_s: float, duration_s: float | None, width: int = 960) -> dict:
+def build_proxy(video_path: Path, out: Path, first_frame: int, last_frame: int,
+                time_offset_s: float, width: int = 960) -> dict:
     """H.264 playback proxy of the run interval for browser <video> playback.
 
-    Frame-exact by construction: FFmpeg accurate seek to ``start_s`` and passthrough of
-    source timestamps (no frame dropping/duplication), keyframe every 15 frames for fast
-    seeking, faststart. Proxy time t corresponds to run time ``start_s + t``. The proxy is
-    a derived copy of restricted footage and stays in the private run folder.
+    Select the same decoded source frame indices as the run; proxy time t maps from the
+    actual first selected source timestamp, not the requested seek boundary.
     """
     tmp = out.with_suffix(".tmp.mp4")
-    cmd = ["ffmpeg", "-v", "error", "-y", "-ss", f"{start_s:.6f}", "-i", str(video_path)]
-    if duration_s:
-        cmd += ["-t", f"{duration_s:.6f}"]
-    cmd += ["-an", "-vf", f"scale={width}:-2", "-fps_mode", "passthrough", "-c:v", "libx264",
+    cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(video_path), "-an", "-vf",
+           f"select=between(n\\,{first_frame}\\,{last_frame}),setpts=PTS-STARTPTS,scale={width}:-2",
+           "-frames:v", str(last_frame - first_frame + 1), "-fps_mode", "passthrough",
+           "-enc_time_base:v", "filter", "-c:v", "libx264",
             "-preset", "veryfast", "-crf", "26", "-g", "15", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
             str(tmp)]
     subprocess.run(cmd, check=True, capture_output=True, timeout=3600)
@@ -259,4 +278,13 @@ def build_proxy(video_path: Path, out: Path, start_s: float, duration_s: float |
     count = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
                             "stream=nb_read_packets", "-of", "csv=p=0", str(out)],
                            check=True, capture_output=True, text=True).stdout.strip()
-    return {"path": out.name, "width": width, "frames": int(count), "time_offset_s": start_s}
+    return {"path": out.name, "width": width, "frames": int(count), "time_offset_s": time_offset_s,
+            "frame_index_range": [first_frame, last_frame], "timestamp_mode": "source_pts"}
+
+
+def frame_exact_proxy(metadata: dict) -> bool:
+    frame_range = metadata.get("frame_index_range")
+    return (metadata.get("timestamp_mode") == "source_pts" and isinstance(frame_range, list)
+            and len(frame_range) == 2 and all(isinstance(i, int) for i in frame_range)
+            and frame_range[0] >= 0 and frame_range[1] >= frame_range[0]
+            and metadata.get("frames") == frame_range[1] - frame_range[0] + 1)

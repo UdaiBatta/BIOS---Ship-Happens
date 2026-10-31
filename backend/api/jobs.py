@@ -23,7 +23,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from .models import Run
-from .services import build_frame_index, build_proxy, build_tracks
+from .services import assert_video_unchanged, build_frame_index, build_proxy, build_tracks, video_timestamps
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ def execute(run: Run, process=None) -> None:
     if process is None:
         from egohand_twin.parallel import process_parallel
         process = process_parallel
+    assert_video_unchanged(run.video)
     out_dir = settings.RUNS_DIR/str(run.id)
     Run.objects.filter(pk=run.pk).update(out_dir=str(out_dir), stage="processing")
     last_update = [0.]
@@ -105,8 +106,15 @@ def execute(run: Run, process=None) -> None:
     Run.objects.filter(pk=run.pk).update(stage="proxy", progress=.98)
     import numpy as np
     with np.load(index_path) as index:
-        processed = len(index["frame_index"])
-    proxy = build_proxy(Path(run.video.path), out_dir/"proxy.mp4", run.start_s, run.duration_s)
+        frame_indices = index["frame_index"]
+        processed = len(frame_indices)
+        if not processed or np.any(np.diff(frame_indices) != 1):
+            raise RuntimeError("processed frames are not one contiguous source interval")
+        first_frame, last_frame = int(frame_indices[0]), int(frame_indices[-1])
+    assert_video_unchanged(run.video)
+    timestamps = video_timestamps(run.video)
+    proxy = build_proxy(Path(run.video.path), out_dir/"proxy.mp4", first_frame, last_frame,
+                        float(timestamps[first_frame]))
     if proxy["frames"] != processed:
         # Never serve a proxy whose frames do not line up with the processed frames.
         (out_dir/"proxy.mp4").unlink(missing_ok=True)

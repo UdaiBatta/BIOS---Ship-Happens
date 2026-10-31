@@ -1,6 +1,7 @@
 """Regression tests for browser writes, run deletion, and stale-worker recovery."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
+
+import numpy as np
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -30,8 +33,11 @@ class P1FixTests(TestCase):
         )
         settings.enable()
         self.addCleanup(settings.disable)
+        source = self.root/"clip.mp4"
+        source.write_bytes(b"synthetic source for isolated API tests")
+        self.enterContext(patch("api.services.video_timestamps", return_value=np.arange(40)/10))
         self.video = Video.objects.create(
-            name="clip.mp4", path=str(self.root/"clip.mp4"), sha256="0" * 64,
+            name="clip.mp4", path=str(source), sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
             width=160, height=90, fps=10, frame_count=40, duration_s=4,
             timestamp_source="test",
         )

@@ -15,11 +15,14 @@ uv run python manage.py egohand_worker --recover           # job worker (second 
 
 Then open **http://127.0.0.1:8000/** for the viewer (`frontend/prototype/index.html`, served by Django with `backend-connector.js`). Choose a completed run and click **Load run**, or queue a new one with **Process**.
 
+Proxy encoding needs FFmpeg support for `-fps_mode passthrough` and `-enc_time_base filter`. The frame-selection and timestamp regressions were verified with FFmpeg 9.0.2.
+
 Environment variables (all optional):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `EGOHAND_MEDIA_ROOTS` | `<repo>/data/private` | `:`-separated folders from which videos may be registered and served |
+| `EGOHAND_MEDIA_ROOTS` | `<repo>/data/private` | Folders from which videos may be registered and served, separated by `;` on Windows or `:` on Unix |
+| `EGOHAND_UPLOAD_DIR` | `<repo>/data/private/uploads` | Dedicated trusted upload folder; uploads work even when media roots point elsewhere |
 | `EGOHAND_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Frontend dev origins allowed by CORS |
 | `EGOHAND_API_TOKEN` | empty (no auth) | If set, send `Authorization: Bearer <token>`. For `<video src>` and `<img src>`, append `?token=<token>`. `/api/health` stays open. |
 | `EGOHAND_RUNS_DIR` | `<repo>/runs/backend` | Where run outputs are written |
@@ -33,7 +36,8 @@ Environment variables (all optional):
 
 - **JSON:** everything is JSON except media. JSON request bodies require `Content-Type: application/json` (a charset is allowed); uploads use multipart. Errors are `{"error": "..."}` with status 400 (bad input), 401 (token), 403 (path or request origin not allowed), 404 (not found), 405 (method), 409 (not ready or unsafe run output path), 415 (wrong JSON content type), or 503 (run output deletion failed; retry).
 - **Browser writes:** POST, PUT, PATCH and DELETE under `/api/` accept the service's own origin or an origin in `EGOHAND_CORS_ORIGINS`. Cross-site browser requests without an `Origin` are rejected. CLI requests without browser origin headers remain supported.
-- **Time:** times are seconds on the **run time base**: seconds since the first presentation timestamp of the source video, the same as `timestamp_s` in frames. The proxy video starts at `start_s`, so `run_time = run.start_s + video.currentTime`.
+- **Time:** times are seconds on the **run time base**: seconds since the first presentation timestamp of the source video, the same as `timestamp_s` in frames. The proxy starts at the first selected source frame, so `run_time = run.proxy.time_offset_s + video.currentTime`. For fractional requested starts this offset can differ from `run.start_s`; use the persisted proxy metadata.
+- **Source integrity:** a registered path keeps its original content identity. If its size or modification time changes, the service rechecks the SHA-256 before reading or processing it. Changed content returns 409; restore the original file or register the new content at a new path. Cached integrity checks assume local files are not changed while preserving both size and modification time. Existing completed proxies remain available independently of the original source.
 - **Image coordinates:** `image_xyz` x and y are normalized to the frame (0–1). To draw on a `<video>` element, multiply by the displayed video width and height (keep the aspect ratio; the proxy is 960 px wide, 16:9 for the official clips). z is model depth, not metric.
 - **3D:** `world_xyz_m` is MediaPipe's hand-relative estimate in metres (origin near the hand centre). It is **not** camera or factory coordinates; spacing between hands in a 3D view is arbitrary.
 - **States:**
@@ -70,7 +74,7 @@ Environment variables (all optional):
 | --- | --- | --- |
 | `POST /api/runs` | `{"video_id": 1, "preset": "recall", "start_s": 0, "duration_s": 30, "workers": 2, "render_preview": false, "write_rrd": false}` | `202 Run` (queued) |
 | `GET /api/runs` | `?video_id=&status=` | `{runs: [Run]}` (newest first) |
-| `GET /api/runs/<id>` | — | `Run` plus `metrics`, `quality_summary` and `video`. **Poll this about once per second while running.** |
+| `GET /api/runs/<id>` | — | `Run` plus `metrics`, `quality_summary`, `video`, `proxy` and `artifacts`. **Poll this about once per second while running.** |
 | `POST /api/runs/<id>/cancel` | — | `Run` (`cancelled`); 409 if already finished |
 | `DELETE /api/runs/<id>` | — | 204 after deleting the outputs this backend created; 409 while queued or running; 503 if output removal fails (record remains for retry) |
 
@@ -78,6 +82,10 @@ Environment variables (all optional):
 - `status`: `queued | running | complete | failed | cancelled`.
 - `stage`: `queued → processing → quality → indexing → proxy → complete`.
 - `progress`: 0–1.
+- `proxy`: `{path, width, frames, time_offset_s, frame_index_range, timestamp_mode}` from `proxy.json`, or null when unavailable. Newly verified proxies carry `timestamp_mode: "source_pts"`; older proxies without that marker are not advertised or served as frame-exact. Submit a new run to regenerate one without overwriting prior outputs.
+- `artifacts`: `{identity: "identity.json" | null, lift: {summary, arrays} | null}`. Lift names come from an existing matching pair, including non-default FOVs; no lift is advertised when disabled or absent. If several supported pairs exist, the first filename in sorted order is selected.
+
+Intervals must contain an actual source presentation timestamp. A start beyond the final frame or an empty fractional interval returns JSON 400 before queuing.
 
 Everything below needs `status == complete` (409 before that).
 
@@ -110,7 +118,7 @@ Quality statuses are **heuristic, task-specific** assessments. `insufficient_evi
 
 | Method and path | Response |
 | --- | --- |
-| `GET /api/runs/<id>/proxy.mp4` | Clean H.264 video of the run interval (960 px), frame-exact, supports Range. Use it as `<video src>` and draw overlays from `/frames`. |
+| `GET /api/runs/<id>/proxy.mp4` | Clean H.264 of the selected source frames (960 px), with their relative presentation times preserved; supports Range. Legacy unverified proxies return 409. Use it as `<video src>` and apply `proxy.time_offset_s` to overlays from `/frames`. |
 | `GET /api/runs/<id>/preview.mp4` | Side-by-side rendered preview (only if the run was submitted with `render_preview: true`) |
 | `GET /api/runs/<id>/compare.jpg?t=6.0` | Same-moment flat frame vs three 3D views of each observed hand. 404 with the nearest observed frames if that moment has no observed hand. About 1.6 s cold, then cached. |
 | `GET /api/runs/<id>/manifest` | `manifest.json`: hashes, parameters including the preset, governance, lens provenance |

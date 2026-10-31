@@ -137,6 +137,8 @@ class ApiTests(TestCase):
         detail = self.client.get(f"/api/runs/{run_id}").json()
         self.assertEqual((detail["status"], detail["progress"]), ("complete", 1.0))
         self.assertIsNotNone(detail["quality_summary"])
+        self.assertEqual(detail["proxy"]["frames"], N)
+        self.assertEqual(detail["artifacts"]["identity"], "identity.json")
         page = self.client.get(f"/api/runs/{run_id}/frames?start_s=1.0&end_s=2.5").json()
         self.assertEqual([f["frame_index"] for f in page["frames"]], list(range(10, 25)))
         hand = page["frames"][0]["hands"][0]
@@ -188,7 +190,9 @@ class ApiTests(TestCase):
         tail = self.client.get(f"/api/runs/{run_id}/preview.mp4", HTTP_RANGE="bytes=-4")
         self.assertEqual(b"".join(tail.streaming_content), bytes(range(252, 256)))
         self.assertEqual(self.client.get(f"/api/runs/{run_id}/preview.mp4", HTTP_RANGE="bytes=5000-").status_code, 416)
-        self.assertEqual(self.client.get(f"/api/runs/{run_id}/artifacts/landmarks.jsonl").status_code, 200)
+        artifact = self.client.get(f"/api/runs/{run_id}/artifacts/landmarks.jsonl")
+        self.assertEqual(artifact.status_code, 200)
+        artifact.close()
         self.assertEqual(self.client.get(f"/api/runs/{run_id}/artifacts/../../etc/passwd").status_code, 404)
 
     def test_frame_jpeg_is_the_exact_requested_frame(self):
@@ -222,6 +226,7 @@ class ApiTests(TestCase):
         self.assertLess(max(abs(m - e) for m, e in zip(means, expected)), 4)
         image = self.client.get(f"/api/runs/{run_id}/compare.jpg?t=1.0")
         self.assertEqual((image.status_code, image["Content-Type"]), (200, "image/jpeg"))
+        image.close()
         self.assertEqual(self.client.get(f"/api/runs/{run_id}/compare.jpg?t=2.5").status_code, 404)  # no hand
 
     def test_cancel_during_late_stage_is_not_overwritten_and_delete_waits(self):

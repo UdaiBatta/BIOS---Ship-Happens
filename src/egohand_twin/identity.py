@@ -13,6 +13,7 @@ track associations (ID switches) propagate into the vote; the vote cannot repair
 from __future__ import annotations
 
 from collections import defaultdict
+import hashlib
 import json
 from pathlib import Path
 
@@ -22,19 +23,19 @@ def right_probability(hand: dict) -> float:
     return score if hand["raw_side"] == "Right" else 1. - score
 
 
-def track_votes(run: Path, margin: float = .15, min_observed: int = 3) -> dict:
+def track_votes(run: Path, margin: float = .15, min_observed: int = 3,
+                source_bytes: bytes | None = None) -> dict:
     stats = defaultdict(lambda: {"n": 0, "sum": 0., "first_s": None, "last_s": None})
-    with (run/"landmarks.jsonl").open() as f:
-        for line in f:
-            frame = json.loads(line)
-            for hand in frame["hands"]:
-                if not hand["observed"]:
-                    continue
-                s = stats[hand["track_id"]]
-                s["n"] += 1
-                s["sum"] += right_probability(hand)
-                s["first_s"] = frame["timestamp_s"] if s["first_s"] is None else s["first_s"]
-                s["last_s"] = frame["timestamp_s"]
+    for line in (source_bytes if source_bytes is not None else (run/"landmarks.jsonl").read_bytes()).splitlines():
+        frame = json.loads(line)
+        for hand in frame["hands"]:
+            if not hand["observed"]:
+                continue
+            s = stats[hand["track_id"]]
+            s["n"] += 1
+            s["sum"] += right_probability(hand)
+            s["first_s"] = frame["timestamp_s"] if s["first_s"] is None else s["first_s"]
+            s["last_s"] = frame["timestamp_s"]
     tracks = {}
     for track_id, s in sorted(stats.items()):
         p = s["sum"]/s["n"]
@@ -53,10 +54,23 @@ def track_votes(run: Path, margin: float = .15, min_observed: int = 3) -> dict:
 def write_identity(run: Path, margin: float = .15, min_observed: int = 3) -> Path:
     if not (run/"COMPLETE").exists():
         raise ValueError("Run is incomplete")
-    result = track_votes(run, margin, min_observed)
     path = run/"identity.json"
+    if path.exists():
+        raise ValueError("identity.json exists; never overwritten")
+    source = (run/"landmarks.jsonl").read_bytes()
+    result = track_votes(run, margin, min_observed, source)
+    result["landmarks_sha256"] = hashlib.sha256(source).hexdigest()
     path.write_text(json.dumps(result, indent=2)+"\n")
     return path
+
+
+def load_identity(run: Path) -> dict:
+    """Load identity votes only when they are bound to this run's exact landmarks bytes."""
+    result = json.loads((run/"identity.json").read_text())
+    expected = hashlib.sha256((run/"landmarks.jsonl").read_bytes()).hexdigest()
+    if result.get("landmarks_sha256") != expected:
+        raise ValueError("identity.json is missing a valid landmarks_sha256 binding for this run")
+    return result
 
 
 ANATOMICAL = {"Left": "wearer_left", "Right": "wearer_right", "unknown": "unknown"}

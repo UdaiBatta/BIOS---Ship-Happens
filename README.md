@@ -103,6 +103,8 @@ Run `uv run egohand <command> --help` for options. Further experimental flags:
 | `quality/` | `quality_frames.csv`, `quality_windows.json`, `review_queue.csv/json`, `quality_summary.json` |
 | `identity.json`, `*.identity.jsonl`, `*.conditions.jsonl`, `lift_*`, `steps.json`, `why3d*.png` | Optional derived files; inputs are never modified and outputs never overwritten |
 
+Identity votes are bound to the exact `landmarks.jsonl` bytes by `landmarks_sha256`; the viewer and evaluator reject foreign or older unbound identity files. To regenerate an older file, preserve it under a backup name first. The identity command preflights both outputs when `--write-jsonl` is requested, and lift sweeps preflight every JSON/NPZ pair before writing any of them.
+
 ## Data contract (summary; full definitions in [DEFINITIONS](docs/DEFINITIONS.md))
 
 - **Raw and filtered values are kept separately.** `image_xyz_raw` and `world_xyz_m_raw` are model outputs; `image_xyz` and `world_xyz_m` are One Euro filtered.

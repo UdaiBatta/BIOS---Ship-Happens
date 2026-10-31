@@ -51,6 +51,8 @@ def api(methods: tuple[str, ...]):
                 return JsonResponse({"error": str(error)}, status=error.status)
             except services.NotReady as error:
                 return JsonResponse({"error": f"not ready: {error}"}, status=409)
+            except services.SourceChanged as error:
+                return JsonResponse({"error": str(error)}, status=409)
             except (Video.DoesNotExist, Run.DoesNotExist, FileNotFoundError) as error:
                 return JsonResponse({"error": f"not found: {error}"}, status=404)
             except PermissionError as error:
@@ -108,13 +110,16 @@ def presets(request):
 
 # --------------------------------------------------------------------------- videos
 def register_video(path: Path) -> Video:
+    source_sha = sha256(path)
     existing = Video.objects.filter(path=str(path)).first()
     if existing:
+        if existing.sha256 != source_sha:
+            raise ApiError("registered source video changed; restore it or register the replacement at a new path", 409)
         return existing
     info = probe(path)
     frames = len(info["timestamps"])
     return Video.objects.create(
-        name=path.name, path=str(path), sha256=sha256(path), width=int(info["width"]), height=int(info["height"]),
+        name=path.name, path=str(path), sha256=source_sha, width=int(info["width"]), height=int(info["height"]),
         fps=info["fps"], frame_count=frames, duration_s=float(info["timestamps"][-1] - info["timestamps"][0]),
         timestamp_source=info["timestamp_source"])
 
@@ -159,6 +164,7 @@ def video_detail(request, video_id: int):
 @api(("GET",))
 def video_frame(request, video_id: int, frame_index: int):
     video = Video.objects.get(pk=video_id)
+    services.assert_video_unchanged(video)
     if not 0 <= frame_index < video.frame_count:
         raise ApiError("frame_index out of range", 404)
     width = number(request, "width", min(640, video.width), int)
@@ -176,8 +182,9 @@ def video_frame(request, video_id: int, frame_index: int):
 def runs(request):
     if request.method == "GET":
         qs = Run.objects.select_related("video").all()
-        if request.GET.get("video_id"):
-            qs = qs.filter(video_id=request.GET["video_id"])
+        video_id = number(request, "video_id", cast=int)
+        if video_id is not None:
+            qs = qs.filter(video_id=video_id)
         if request.GET.get("status"):
             qs = qs.filter(status=request.GET["status"])
         return {"runs": [r.as_dict() for r in qs[:200]]}
@@ -194,15 +201,19 @@ def runs(request):
         except (TypeError, ValueError):
             raise ApiError(f"{name} must be a number")
     video = Video.objects.get(pk=field("video_id", int))
+    services.assert_video_unchanged(video)
     preset = data.get("preset", "recall")
     if preset not in PRESETS:
         raise ApiError(f"preset must be one of {sorted(PRESETS)}")
     start = field("start_s", float, 0.)
     duration = field("duration_s", float)
-    if not math.isfinite(start) or start < 0 or start >= video.duration_s + 1/video.fps:
+    timestamps = services.video_timestamps(video)
+    if not math.isfinite(start) or start < 0 or start > timestamps[-1]:
         raise ApiError("start_s outside the video")
     if duration is not None and (not math.isfinite(duration) or duration <= 0):
         raise ApiError("duration_s must be positive")
+    if duration is not None and timestamps.searchsorted(start + duration, side="left") == timestamps.searchsorted(start, side="left"):
+        raise ApiError("requested interval contains no video frames")
     # 2 detection processes measured identical to sequential and ~20% faster on a 4-vCPU host.
     workers = field("workers", int, 2 if (os.cpu_count() or 1) >= 4 else 1)
     if not 1 <= workers <= (os.cpu_count() or 1):
@@ -234,6 +245,22 @@ def run_detail(request, run_id):
         return HttpResponse(status=204)
     data = run.as_dict(detail=True)
     data["video"] = run.video.as_dict()
+    if run.status == Run.Status.COMPLETE:
+        directory = run_dir(run)
+        proxy_path = directory/"proxy.json"
+        proxy = services.cached_json(proxy_path) if proxy_path.exists() else None
+        data["proxy"] = proxy if proxy and services.frame_exact_proxy(proxy) else None
+        identity = directory/"identity.json"
+        lifts = sorted(path for path in directory.glob("lift_hfov*.json")
+                       if re.fullmatch(r"lift_hfov\d{2,3}\.json", path.name)
+                       and path.with_suffix(".npz").is_file())
+        lift = lifts[0] if lifts else None
+        data["artifacts"] = {
+            "identity": identity.name if identity.is_file() else None,
+            "lift": {"summary": lift.name, "arrays": lift.with_suffix(".npz").name} if lift else None,
+        }
+    else:
+        data.update(proxy=None, artifacts={"identity": None, "lift": None})
     return data
 
 
@@ -403,11 +430,14 @@ def run_preview(request, run_id):
 
 @api(("GET",))
 def run_proxy(request, run_id):
-    """Clean H.264 video of the run interval (960 px). Proxy time t = run time start_s + t."""
+    """Frame-exact H.264 run proxy; old proxies need regeneration before serving."""
     directory = run_dir(Run.objects.get(pk=run_id))
     path = directory/"proxy.mp4"
     if not path.exists():
         raise services.NotReady("proxy.mp4")
+    metadata_path = directory/"proxy.json"
+    if not metadata_path.exists() or not services.frame_exact_proxy(services.cached_json(metadata_path)):
+        raise ApiError("proxy predates frame-exact alignment; submit a new run", 409)
     response = ranged_file(path, request, "video/mp4")
     response["Cache-Control"] = "private, max-age=86400"
     return response
@@ -448,6 +478,7 @@ def run_compare(request, run_id):
     out = png.with_suffix(".jpg")
     if not out.exists():
         if not png.exists():
+            services.assert_video_unchanged(run.video)
             compare(Path(run.video.path), directory, png, frame_index=record["frame_index"])
         import cv2
         cv2.imwrite(str(out), cv2.imread(str(png)), [cv2.IMWRITE_JPEG_QUALITY, 88])  # ~10x smaller than PNG

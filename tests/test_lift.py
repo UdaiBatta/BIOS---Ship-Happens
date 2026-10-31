@@ -1,8 +1,29 @@
 import cv2
+import json
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
-from egohand_twin.lift import EquidistantFisheye, solve_hand
+from egohand_twin.lift import EquidistantFisheye, lift_run, solve_hand
+
+
+@pytest.mark.parametrize("hfovs,existing", [([120., 150.], "json"), ([120., 150.], "npz"),
+                                            ([120.1, 120.4], None)])
+def test_lift_sweep_rejects_conflicts_before_writing_any_pair(tmp_path, hfovs, existing):
+    from egohand_twin.cli import lift_command
+
+    (tmp_path/"COMPLETE").touch()
+    (tmp_path/"manifest.json").write_text(json.dumps({"source": {"width": 160, "height": 90}}))
+    (tmp_path/"landmarks.jsonl").write_text('{"frame_index":0,"timestamp_s":0,"hands":[]}\n')
+    preserved = tmp_path/f"lift_hfov150.{existing}" if existing else None
+    if preserved:
+        preserved.write_bytes(b"preserve this existing result")
+    with pytest.raises(ValueError, match="never overwritten|duplicate"):
+        lift_command(SimpleNamespace(run=str(tmp_path), hfov=hfovs, max_reproj_px=25.))
+    assert not (tmp_path/"lift_hfov120.npz").exists()
+    assert not (tmp_path/"lift_hfov120.json").exists()
+    if preserved:
+        assert preserved.read_bytes() == b"preserve this existing result"
 
 W, H = 1920, 1080
 
@@ -63,3 +84,13 @@ def test_rejects_hands_outside_valid_rays_and_bad_fits():
     scrambled = image[::-1]  # landmarks inconsistent with the 3D shape
     r = solve_hand(cam, scrambled, world, max_reproj_px=2.)
     assert not r["ok"]
+
+
+def test_lift_refuses_existing_pair_before_writing(tmp_path):
+    (tmp_path/"COMPLETE").touch()
+    summary = tmp_path/"lift_hfov150.json"
+    summary.write_bytes(b"keep these bytes\n")
+    with pytest.raises(ValueError, match="never overwritten"):
+        lift_run(tmp_path, 150)
+    assert summary.read_bytes() == b"keep these bytes\n"
+    assert not (tmp_path/"lift_hfov150.npz").exists()

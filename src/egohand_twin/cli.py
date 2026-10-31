@@ -72,6 +72,34 @@ def doctor(args):
                      indent=2))
 
 
+def identity_command(args):
+    run = Path(args.run)
+    outputs = [run/"identity.json"] + ([run/"landmarks.identity.jsonl"] if args.write_jsonl else [])
+    existing = [str(path.name) for path in outputs if path.exists()]
+    if existing:
+        raise ValueError(f"output exists; never overwritten: {', '.join(existing)}")
+    paths = [write_identity(run, args.margin, args.min_observed)]
+    if args.write_jsonl:
+        paths.append(write_identity_jsonl(run, args.margin, args.min_observed))
+    print("\n".join(map(str, paths)))
+
+
+def lift_command(args):
+    run = Path(args.run)
+    if any(not 10 < h < 240 for h in args.hfov):
+        raise ValueError("hfov_deg must be between 10 and 240")
+    tags = [f"hfov{int(round(h))}" for h in args.hfov]
+    outputs = [run/f"lift_{tag}.{ext}" for tag in tags for ext in ("npz", "json")]
+    existing = [path.name for path in outputs if path.exists()]
+    if len(tags) != len(set(tags)):
+        raise ValueError("HFOV values produce duplicate lift output names")
+    if existing:
+        raise ValueError(f"output exists; never overwritten: {', '.join(existing)}")
+    print(json.dumps({
+        "hand_relative_bone_variation": hand_relative_variation(run),
+        "lifts": {str(h): lift_run(run, h, max_reproj_px=args.max_reproj_px) for h in args.hfov}}, indent=2))
+
+
 def sample_labels(args):
     source, out = Path(args.video), Path(args.out)
     if out.exists() and any(out.iterdir()):
@@ -228,17 +256,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-observed", type=int, default=3)
     p.add_argument("--write-jsonl", action="store_true",
                    help="Also write landmarks.identity.jsonl with anatomical_side from the vote (assumes wearer hands)")
-    p.set_defaults(func=lambda a: print(write_identity(Path(a.run), a.margin, a.min_observed),
-                                        write_identity_jsonl(Path(a.run), a.margin, a.min_observed)
-                                        if a.write_jsonl else ""))
+    p.set_defaults(func=identity_command)
     p = commands.add_parser("lift", help="EXPERIMENTAL camera-space PnP under an assumed fisheye lens")
     p.add_argument("run")
     p.add_argument("--hfov", type=float, nargs="+", default=[150.],
                    help="Assumed horizontal field(s) of view in degrees; several values give a sensitivity sweep")
     p.add_argument("--max-reproj-px", type=float, default=25.)
-    p.set_defaults(func=lambda a: print(json.dumps({
-        "hand_relative_bone_variation": hand_relative_variation(Path(a.run)),
-        "lifts": {str(h): lift_run(Path(a.run), h, max_reproj_px=a.max_reproj_px) for h in a.hfov}}, indent=2)))
+    p.set_defaults(func=lift_command)
     p = commands.add_parser("quality", help="Task-specific quality signals and a timestamped review queue (cached run)")
     p.add_argument("run")
     p.add_argument("video")

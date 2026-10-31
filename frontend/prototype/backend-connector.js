@@ -7,8 +7,8 @@
  * It reuses the viewer's own loaders (parseJsonl, loadFrames, addResultFile, afterResults),
  * so every check the viewer applies to local files also applies to backend data:
  *  - landmarks.jsonl            -> Load JSONL path
- *  - identity.json, lift_*.json/npz -> Add results path (lift = EXPERIMENTAL, assumed lens)
- *  - proxy.mp4 (frame-exact H.264 of the run interval) -> video element, offset by run.start_s
+ *  - optional identity.json and lift summary/arrays -> Add results path (lift = EXPERIMENTAL, assumed lens)
+ *  - proxy.mp4 (frame-exact H.264 of the selected frames) -> video element, offset by proxy metadata
  * Everything stays on this machine: the backend binds to 127.0.0.1.
  */
 (() => {
@@ -76,17 +76,21 @@
     const run = await json(`runs/${id}`);
     status(`loading run ${id.slice(0, 8)}…`);
     setPlaying(false);
-    const text = await (await api(`runs/${id}/artifacts/landmarks.jsonl`)).text();
+    const bytes = await (await api(`runs/${id}/artifacts/landmarks.jsonl`)).arrayBuffer();
+    const checksum = await landmarksSha256(bytes);
+    const text = new TextDecoder().decode(bytes);
     const { out, bad, rule } = parseJsonl(text);
     if (!out.length) throw new Error('the run has no frame records');
     loadFrames(out, { synthetic: false, clipId: `${run.video.name} · ${run.preset} · run ${id.slice(0, 8)}` });
+    S.landmarksSha256 = checksum;
     const messages = [];
     if (bad) messages.push(`${bad} lines skipped`);
     if (rule) messages.push(`${rule} predicted/lost hands carried 3D and are shown as 2D only`);
     // Side votes, then the lift summary before its arrays (the viewer needs the lens first).
-    const extras = [['identity.json', 'identity.json']];
-    const lift = 'lift_hfov150';   // the worker's EXPERIMENTAL assumed-lens lift (EGOHAND_LIFT_HFOV)
-    extras.push([`${lift}.json`, `${lift}.json`], [`${lift}.npz`, `${lift}.npz`]);
+    const extras = [];
+    if (run.artifacts?.identity) extras.push([run.artifacts.identity, run.artifacts.identity]);
+    if (run.artifacts?.lift) extras.push([run.artifacts.lift.summary, run.artifacts.lift.summary],
+      [run.artifacts.lift.arrays, run.artifacts.lift.arrays]);
     for (const [artifact, name] of extras) {
       try { messages.push(`${name}: ${await addResultFile(await fileFrom(`runs/${id}/artifacts/${artifact}`, name))}`); }
       catch (error) { messages.push(`${name}: not loaded (${error.message})`); }
@@ -94,11 +98,17 @@
     afterResults();
     const video = document.getElementById('video');
     if (video.src && video.src.startsWith('blob:')) URL.revokeObjectURL(video.src);
-    S.videoOffset = run.start_s;   // the proxy starts at the run's start time
-    video.src = withToken(`/api/runs/${id}/proxy.mp4`);
+    if (run.proxy) {
+      S.videoOffset = run.proxy.time_offset_s;
+      video.src = withToken(`/api/runs/${id}/proxy.mp4`);
+    } else {
+      S.videoOffset = 0;
+      video.removeAttribute('src'); video.load();
+    }
     S.video = video;
     video.addEventListener('loadeddata', () => { seek(S.t); S.dirty = true; }, { once: true });
-    document.getElementById('videoBadge').textContent = 'Proxy video from the local backend (frame-exact H.264 of the run interval)';
+    document.getElementById('videoBadge').textContent = run.proxy
+      ? `Proxy video from the local backend (${run.proxy.frames} selected frames)` : 'No frame-exact proxy is available for this run';
     document.getElementById('footer').textContent =
       `Loaded ${out.length} frames of run ${id.slice(0, 8)} (${run.preset}) from the local backend. Nothing leaves this machine. ` +
       'Coverage counts frames with a tracked wearer hand; that is coverage, not accuracy. Camera-space 3D uses an ASSUMED lens.';

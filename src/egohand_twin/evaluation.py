@@ -16,6 +16,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from .conditions import condition_at, load_conditions
+from .identity import load_identity
 
 WEARER_SIDES = {"wearer_left": "Left", "wearer_right": "Right"}
 
@@ -160,7 +161,7 @@ def evaluate(run: Path, labels: Path, wrist_threshold=.10, pck_threshold=.03,
     predictions = load_predictions(run)
     votes = None
     if (run/"identity.json").exists():
-        votes = json.loads((run/"identity.json").read_text())["tracks"]
+        votes = load_identity(run)["tracks"]
     w, h = manifest["source"]["width"], manifest["source"]["height"]
     scale = np.array([w, h])/np.hypot(w, h)
     tp = fp = fn = switches = points_correct = points_total = 0

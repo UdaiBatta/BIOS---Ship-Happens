@@ -132,3 +132,17 @@ def test_missing_reason_border_touch_without_motion():
     rec = tracker.update([], .1)[0]
     assert rec["missing_reason"] == "out_of_view"
     assert "touched the image border" in rec["missing_reason_basis"]
+
+
+def test_presets_fill_only_unset_options():
+    import argparse
+    from egohand_twin.cli import apply_preset
+    base = dict(detection_threshold=None, presence_threshold=None, tracking_threshold=None, rescue_crop=None)
+    recall = apply_preset(argparse.Namespace(preset="recall", **base))
+    assert (recall.detection_threshold, recall.rescue_crop) == (.3, True)
+    baseline = apply_preset(argparse.Namespace(preset="baseline", **base))
+    assert (baseline.detection_threshold, baseline.rescue_crop) == (.5, False)
+    tiles = apply_preset(argparse.Namespace(preset="recall", rescue="tiles", **base))
+    assert tiles.rescue_crop is False and tiles.detection_threshold == .3
+    override = apply_preset(argparse.Namespace(preset="recall", **{**base, "detection_threshold": .4}))
+    assert (override.detection_threshold, override.presence_threshold) == (.4, .3)

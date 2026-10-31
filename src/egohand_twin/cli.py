@@ -28,6 +28,21 @@ from .pipeline import probe, process
 from .render import fit_image, text, rebuild_replay
 
 
+PRESETS = {
+    "baseline": {"detection_threshold": .5, "presence_threshold": .5, "tracking_threshold": .5, "rescue_crop": False},
+    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True},
+}
+
+
+def apply_preset(args):
+    """Fill unset detector options from the preset; explicitly given flags win."""
+    for key, value in PRESETS[args.preset].items():
+        if getattr(args, key) is None:
+            # An explicit --rescue strategy replaces the preset's historical centre crop.
+            setattr(args, key, False if key == "rescue_crop" and getattr(args, "rescue", None) else value)
+    return args
+
+
 def mediapipe_runtime() -> str:
     """Check that MediaPipe's native library loads (on Linux it needs libGLESv2/libEGL)."""
     try:
@@ -157,7 +172,7 @@ def main():
     p.add_argument("--num-hands", type=int, default=2)
     p.add_argument("--identity", choices=["persistent", "baseline"], default="persistent")
     p.add_argument("--detector-mode", choices=["video", "image"], default="video")
-    p.add_argument("--rescue-crop", action="store_true", help="Historical center-crop rescue on the downscaled frame (wrist dedupe)")
+    p.add_argument("--rescue-crop", action="store_true", default=None, help="Historical center-crop rescue on the downscaled frame (wrist dedupe)")
     p.add_argument("--rescue", help="Experimental full-resolution crop strategies, comma-separated: guided,center,tiles")
     p.add_argument("--max-crops", type=int, default=4, help="Maximum crop proposals evaluated per frame")
     p.add_argument("--crop-max-side", type=int, help="Area-downscale each rescue crop to at most this many pixels")
@@ -172,9 +187,12 @@ def main():
                    help="Association distance units; diagonal is aspect-ratio correct")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
-    p.add_argument("--detection-threshold", type=float, default=.5)
-    p.add_argument("--presence-threshold", type=float, default=.5)
-    p.add_argument("--tracking-threshold", type=float, default=.5)
+    p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",
+                   help="baseline: MediaPipe defaults (historical B0). recall: thresholds 0.3 + centre-crop rescue, "
+                        "chosen on dev labels and confirmed once on holdout (provisional labels). Explicit flags override.")
+    p.add_argument("--detection-threshold", type=float)
+    p.add_argument("--presence-threshold", type=float)
+    p.add_argument("--tracking-threshold", type=float)
     p.add_argument("--no-video", action="store_true")
     p.add_argument("--rrd", action="store_true", help="Write synchronized Rerun recording")
     p.set_defaults(func=process)
@@ -286,6 +304,8 @@ def main():
         Path(a.video), Path(a.out), probe(Path(a.video))["timestamps"],
         parse_intervals(a.intervals), a.step_frames, a.split)["frames"]), "frames"))
     args = parser.parse_args()
+    if getattr(args, "command", None) == "process":
+        apply_preset(args)
     for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "max_crops", "crop_max_side", "wrist_threshold", "pck_threshold"]:
         if hasattr(args, name) and getattr(args, name) is not None and getattr(args, name) <= 0:
             parser.error(f"{name.replace('_', '-')} must be positive")

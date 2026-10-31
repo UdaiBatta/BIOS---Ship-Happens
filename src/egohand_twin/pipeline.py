@@ -223,7 +223,10 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                 inference_start = time.perf_counter()
                 detections = (detector.detect(rgb, timestamp, frame) if not isinstance(detector, Detector)
                               else detector.detect(rgb, timestamp))
-                latency.append(time.perf_counter() - inference_start)
+                measured = time.perf_counter() - inference_start
+                # Precomputed (parallel) detections report the worker's real inference time.
+                latency.append(detector.reported_latency(timestamp, measured)
+                               if hasattr(detector, "reported_latency") else measured)
                 stages["detect"] += latency[-1]
                 mark = time.perf_counter()
                 hands = (tracker.update(detections, timestamp) if args.identity == "persistent"

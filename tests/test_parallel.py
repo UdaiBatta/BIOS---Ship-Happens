@@ -59,3 +59,9 @@ def test_merge_reports_unconverged_seam():
     merged, seams = merge_chunks([a, b], agree=2)
     assert len(merged[1]) == 1 and len(merged[2]) == 1 and merged[3] == []
     assert seams[0]["converged"] is False and seams[0]["frames_from_previous_chunk"] == 2
+
+
+def test_precomputed_detector_reports_worker_latency():
+    d = PrecomputedDetector({0.1: []}, {0.1: .05})
+    assert d.reported_latency(.1, 1e-6) == .05
+    assert d.reported_latency(.2, 1e-6) == 1e-6

@@ -88,6 +88,10 @@ class PrecomputedDetector:
             raise RuntimeError(f"no precomputed detections for t={timestamp_s:.6f}")
         return self.by_timestamp[key]
 
+    def reported_latency(self, timestamp_s, measured):
+        """Inference time measured in the worker process for this frame (not the lookup time)."""
+        return self.latency.get(round(timestamp_s, 6), measured)
+
     def close(self):
         pass
 

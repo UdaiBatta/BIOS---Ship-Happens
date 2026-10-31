@@ -21,7 +21,8 @@ Measured on one clip (one of four recording families) with **provisional labels*
 | Reliability in replay: state lanes, side probability, `missing_reason`, units | Implemented; `out_of_view` contradicted in 6/15 holdout cases, so treat it as a hint |
 | Same-moment flat-vs-3D image, `steps.json` step markers with sign-off | Implemented; whether 3D helps users is **not measured** |
 | Per-frame JSON Schema validation, governance and lens provenance in the manifest | Implemented (manifest schema 0.5) |
-| Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps), identical outputs |
+| Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps). Parallel chunked detection (`--workers 2`): 63 s → 50 s for the recall preset, identical detections |
+| Django backend API with job worker | Implemented; 9 backend tests; endpoints answer in 5–32 ms once a run is indexed |
 | Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens; depth moves ±25% with the assumed FOV |
 | Meshes, robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
 
@@ -57,6 +58,17 @@ uv run rerun runs/clip/review.rrd
   ```sh
   uv run rerun --serve-web --bind 127.0.0.1 --port 9877 --web-viewer-port 9091 runs/clip/review.rrd
   ```
+
+## Backend API (for the frontend)
+
+A Django service in `backend/` exposes runs, frames, track lanes, quality windows, the review queue (with reviewer decisions), a frame-exact H.264 proxy and exports as a JSON API. A database-backed worker processes jobs. See [docs/BACKEND_API.md](docs/BACKEND_API.md).
+
+```sh
+uv sync --extra dev --extra viewer --extra backend
+cd backend && uv run python manage.py migrate
+uv run python manage.py runserver 127.0.0.1:8000       # and, in another terminal:
+uv run python manage.py egohand_worker --recover
+```
 
 ## Workflow commands
 
@@ -138,8 +150,9 @@ src/egohand_twin/
   identity.py    offline left/right vote       compare.py    same-moment flat vs 3D image
   steps.py       steps.json sidecar            conditions.py capture conditions and exclusions
   governance.py  governance, retention         schema.py     JSON Schema validation (+ schemas/)
-  lift.py        EXPERIMENTAL camera-space PnP
-tests/           85 tests: tracking, crops, evaluation, quality, lift, schema, governance, review
+  lift.py        EXPERIMENTAL camera-space PnP parallel.py   parallel chunked detection, seam repair
+backend/         Django API (api/: models, views, services, jobs, worker command, tests)
+tests/           91 core tests; backend/api/tests: 9 API tests
 ```
 
 ## References

@@ -6,6 +6,7 @@ source of truth; the API reads them through indexed, cached accessors.
 """
 from __future__ import annotations
 
+from pathlib import Path
 import uuid
 
 from django.db import models
@@ -28,6 +29,7 @@ class Video(models.Model):
         return {"id": self.id, "name": self.name, "sha256": self.sha256, "width": self.width,
                 "height": self.height, "fps": self.fps, "frame_count": self.frame_count,
                 "duration_s": self.duration_s, "timestamp_source": self.timestamp_source,
+                "available": Path(self.path).is_file(),  # False once the file was moved or deleted
                 "created_at": self.created_at.isoformat()}
 
 

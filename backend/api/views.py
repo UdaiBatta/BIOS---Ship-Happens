@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import uuid
 
 from django.conf import settings
@@ -142,6 +143,44 @@ def register_video(path: Path) -> Video:
         name=services.display_name(path), path=str(path), sha256=source_sha, width=int(info["width"]), height=int(info["height"]),
         fps=info["fps"], frame_count=frames, duration_s=float(info["timestamps"][-1] - info["timestamps"][0]),
         timestamp_source=info["timestamp_source"])
+
+
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
+
+
+def scan_media(paths=None) -> dict:
+    """Register every video under the allowed media folders (or the given files/folders).
+
+    Already registered files are skipped without re-hashing (processing verifies the hash before a
+    run is queued and again in the worker), so a rescan only costs time for NEW files. Unreadable
+    files are reported, never fatal.
+    """
+    targets = [Path(p) for p in paths] if paths else [r for r in settings.MEDIA_ROOTS if r.is_dir()]
+    files = []
+    for target in targets:
+        if target.is_dir():
+            files += sorted(p for p in target.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES)
+        else:
+            files.append(target)
+    report = {"registered": [], "already_registered": 0, "failed": []}
+    for path in files:
+        try:
+            resolved = services.allowed_media_path(path)
+            if Video.objects.filter(path=str(resolved)).exists():
+                report["already_registered"] += 1
+                continue
+            report["registered"].append(register_video(resolved).as_dict())
+        except subprocess.CalledProcessError:
+            report["failed"].append({"name": path.name, "error": "not a readable video (FFprobe could not open it)"})
+        except Exception as error:  # outside the allowed folders, changed or corrupt
+            report["failed"].append({"name": path.name, "error": str(error)[:300]})
+    return report
+
+
+@api(("POST",))
+def videos_scan(request):
+    """Find videos added to the media folders since the server started."""
+    return scan_media()
 
 
 @api(("GET", "POST"))

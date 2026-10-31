@@ -48,7 +48,7 @@ class RegisterFolderTests(TestCase):
             out, _ = self.register(self.media)
         # Only the never-registered broken file is tried again.
         self.assertEqual([call.args[0].name for call in rehash.call_args_list], ["broken.mp4"])
-        self.assertEqual(out.count("already registered"), 2)
+        self.assertIn("\"already_registered\": 2", out)
         self.assertEqual(Video.objects.count(), 2)
 
     def test_files_outside_the_allowed_folders_are_refused(self):

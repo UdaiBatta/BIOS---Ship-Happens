@@ -127,23 +127,42 @@ class VideoSink:
 
 
 class RerunSink:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, lift: dict | None = None):
+        """``lift`` optionally maps (frame_index, track_id) -> 21x3 camera-space joints from
+        ``egohand lift``; it is shown in its own EXPERIMENTAL view, never mixed with the
+        hand-relative view."""
         import rerun as rr
         import rerun.blueprint as rrb
         self.rr = rr
+        self.lift = lift
         rr.init("egohand_twin", spawn=False)
         rr.save(str(path))
+        views = [rrb.Spatial2DView(origin="video", name="Source + 2D"),
+                 rrb.Spatial3DView(origin="hands", name="Hand-relative 3D; spacing arbitrary",
+                                   eye_controls=rrb.EyeControls3D(
+                                       kind=rrb.Eye3DKind.Orbital,
+                                       position=(0., -.05, -.65),
+                                       look_target=(0., -.05, 0.), eye_up=(0., -1., 0.)),
+                                   line_grid=False)]
+        if lift is not None:
+            views.append(rrb.Spatial3DView(
+                origin="camera_space", name=f"EXPERIMENTAL camera space ({lift['label']})",
+                eye_controls=rrb.EyeControls3D(kind=rrb.Eye3DKind.Orbital, position=(.6, -.6, -.5),
+                                               look_target=(0., 0., .45), eye_up=(0., -1., 0.))))
         rr.send_blueprint(rrb.Blueprint(rrb.Vertical(
-            rrb.Horizontal(rrb.Spatial2DView(origin="video", name="Source + 2D"),
-                           rrb.Spatial3DView(origin="hands", name="Hand-relative 3D; spacing arbitrary",
-                                             eye_controls=rrb.EyeControls3D(
-                                                 kind=rrb.Eye3DKind.Orbital,
-                                                 position=(0., -.05, -.65),
-                                                 look_target=(0., -.05, 0.), eye_up=(0., -1., 0.)),
-                                             line_grid=False)),
+            rrb.Horizontal(*views),
             rrb.TextLogView(origin="reliability", name="Tracking events"),
             row_shares=[4, 1]), rrb.TimePanel(timeline="video_time"), collapse_panels=True))
         rr.log("hands", rr.ViewCoordinates.RDF, static=True)
+        if lift is not None:
+            rr.log("camera_space", rr.ViewCoordinates.RDF, static=True)
+            # Simple frustum glyph at the camera origin (x right, y down, z forward).
+            corners = np.array([[-.08, -.05, .1], [.08, -.05, .1], [.08, .05, .1], [-.08, .05, .1]])
+            strips = [[[0, 0, 0], c] for c in corners] + [list(corners) + [corners[0]]]
+            rr.log("camera_space/camera", rr.LineStrips3D(strips, colors=(200, 200, 200), radii=.002), static=True)
+            rr.log("camera_space/note", rr.TextDocument(
+                "Camera coordinates under an ASSUMED lens model; depth unvalidated; not factory coordinates."),
+                static=True)
         self.previous_states = {}
 
     def write(self, frame, sample):
@@ -153,6 +172,16 @@ class RerunSink:
         rgb = cv2.cvtColor(overlay(frame, sample["hands"]), cv2.COLOR_BGR2RGB)
         rr.log("video/image", rr.Image(rgb).compress(jpeg_quality=80))
         rr.log("hands", rr.Clear(recursive=True))
+        if self.lift is not None:
+            rr.log("camera_space/hands", rr.Clear(recursive=True))
+            for hand in sample["hands"]:
+                joints = self.lift["joints"].get((sample["frame_index"], hand["track_id"]))
+                if joints is None:
+                    continue
+                c = color(hand)[::-1]
+                root = f"camera_space/hands/track_{hand['track_id']}"
+                rr.log(root+"/joints", rr.Points3D(joints, colors=c, radii=.004))
+                rr.log(root+"/bones", rr.LineStrips3D(joints[np.asarray(CONNECTIONS)], colors=c, radii=.002))
         occupied_slots = set()
         for hand in sample["hands"]:
             key = hand["track_id"]
@@ -178,7 +207,20 @@ class RerunSink:
         self.rr.disconnect()
 
 
-def rebuild_replay(video: Path, run: Path, output: Path):
+def load_lift(path: Path) -> dict:
+    data = np.load(path, allow_pickle=False)
+    joints = {}
+    for i in np.flatnonzero(data["ok"]):
+        joints[(int(data["frame_index"][i]), int(data["track_id"][i]))] = data["joints_cam_m"][i].astype(float)
+    summary = path.with_suffix(".json")
+    label = path.stem
+    if summary.exists():
+        camera = json.loads(summary.read_text())["camera"]
+        label = f"assumed {camera['model']} HFOV {camera['hfov_deg']:g} deg"
+    return {"joints": joints, "label": label}
+
+
+def rebuild_replay(video: Path, run: Path, output: Path, lift: Path | None = None):
     """Re-render cached observations without running or changing the detector."""
     if not (run/"COMPLETE").exists():
         raise ValueError("Run is incomplete")
@@ -189,7 +231,7 @@ def rebuild_replay(video: Path, run: Path, output: Path):
         raise ValueError("Source video does not match the cached run")
     output.parent.mkdir(parents=True, exist_ok=True)
     cap = cv2.VideoCapture(str(video))
-    sink = RerunSink(output)
+    sink = RerunSink(output, load_lift(lift) if lift else None)
     count = 0
     try:
         frame_index = -1

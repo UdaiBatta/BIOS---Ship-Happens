@@ -123,7 +123,9 @@ def main():
     p.add_argument("video")
     p.add_argument("run")
     p.add_argument("--out", required=True, help="New .rrd output filename")
-    p.set_defaults(func=lambda a: rebuild_replay(Path(a.video), Path(a.run), Path(a.out)))
+    p.add_argument("--lift", help="Optional lift_*.npz from 'egohand lift' for an experimental camera-space view")
+    p.set_defaults(func=lambda a: rebuild_replay(Path(a.video), Path(a.run), Path(a.out),
+                                                 Path(a.lift) if a.lift else None))
     p = commands.add_parser("evaluate", help="Score observed detections against manual labels")
     p.add_argument("run")
     p.add_argument("labels")

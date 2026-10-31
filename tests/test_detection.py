@@ -72,7 +72,7 @@ def make_detector(primary, secondary, **kw):
     d = MultiViewDetector.__new__(MultiViewDetector)
     defaults = dict(num_hands=2, strategies=["guided"], max_crops=4, dedupe="landmarks",
                     guided_scale=2.5, guided_min_px=320, guided_gap_s=.5, guided_anchor_s=1.,
-                    guided_gate=.08, tile_count=3, tile_fraction=.75, memory=[],
+                    guided_gate=.08, tile_count=3, tile_fraction=.75, memory=[], crop_max_side=None,
                     stats={"crops": 0, "frames_with_crops": 0, "accepted": {}, "duplicates": 0,
                            "guided_rejected_gate": 0, "memory_expired": 0})
     defaults.update(kw)

@@ -136,7 +136,8 @@ def process(args):
             detector = CropRescueDetector(Path(args.model), **options)
         elif rescue:
             detector = MultiViewDetector(Path(args.model), strategies=rescue,
-                                         max_crops=args.max_crops, dedupe=args.dedupe, **options)
+                                         max_crops=args.max_crops, dedupe=args.dedupe,
+                                         crop_max_side=getattr(args, "crop_max_side", None), **options)
         else:
             detector = Detector(Path(args.model), **options)
         if not args.no_video:

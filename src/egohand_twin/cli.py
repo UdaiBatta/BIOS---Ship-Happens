@@ -102,6 +102,7 @@ def main():
     p.add_argument("--rescue-crop", action="store_true", help="Historical center-crop rescue on the downscaled frame (wrist dedupe)")
     p.add_argument("--rescue", help="Experimental full-resolution crop strategies, comma-separated: guided,center,tiles")
     p.add_argument("--max-crops", type=int, default=4, help="Maximum crop proposals evaluated per frame")
+    p.add_argument("--crop-max-side", type=int, help="Area-downscale each rescue crop to at most this many pixels")
     p.add_argument("--dedupe", choices=["landmarks", "wrist"], default="landmarks",
                    help="Duplicate rule for --rescue candidates")
     p.add_argument("--timestamp-source", choices=["auto", "frames"], default="auto",
@@ -154,7 +155,7 @@ def main():
         Path(a.video), Path(a.out), probe(Path(a.video))["timestamps"],
         parse_intervals(a.intervals), a.step_frames, a.split)["frames"]), "frames"))
     args = parser.parse_args()
-    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "max_crops", "wrist_threshold", "pck_threshold"]:
+    for name in ["max_width", "stride", "max_frames", "duration", "num_hands", "samples", "step_frames", "max_crops", "crop_max_side", "wrist_threshold", "pck_threshold"]:
         if hasattr(args, name) and getattr(args, name) is not None and getattr(args, name) <= 0:
             parser.error(f"{name.replace('_', '-')} must be positive")
     if getattr(args, "start_seconds", 0) < 0:

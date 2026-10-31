@@ -230,7 +230,7 @@ class MultiViewDetector:
     """
     def __init__(self, model_path, strategies=("center",), max_crops=4, dedupe="landmarks",
                  guided_scale=2.5, guided_min_px=320, guided_gap_s=.5, guided_anchor_s=1.,
-                 guided_gate=.08, tile_count=3, tile_fraction=.75, **kwargs):
+                 guided_gate=.08, tile_count=3, tile_fraction=.75, crop_max_side=None, **kwargs):
         unknown = set(strategies) - {"guided", "center", "tiles"}
         if unknown:
             raise ValueError(f"Unknown rescue strategies: {sorted(unknown)}")
@@ -242,6 +242,9 @@ class MultiViewDetector:
         self.guided_scale, self.guided_min_px = guided_scale, guided_min_px
         self.guided_gap_s, self.guided_anchor_s, self.guided_gate = guided_gap_s, guided_anchor_s, guided_gate
         self.tile_count, self.tile_fraction = tile_count, tile_fraction
+        # Optional area-filtered downscale of each crop before inference. Normalized
+        # crop coordinates are resolution independent, so mapping is unchanged.
+        self.crop_max_side = crop_max_side
         self.memory: list[dict] = []
         self.stats = {"crops": 0, "frames_with_crops": 0, "accepted": {}, "duplicates": 0,
                       "guided_rejected_gate": 0, "memory_expired": 0}
@@ -278,6 +281,12 @@ class MultiViewDetector:
                 x0, y0, x1, y1 = box
                 crop = np.ascontiguousarray(full[y0:y1, x0:x1, ::-1]) if full_bgr is not None \
                     else np.ascontiguousarray(rgb[y0:y1, x0:x1])
+                longest = max(crop.shape[:2])
+                if self.crop_max_side and longest > self.crop_max_side:
+                    import cv2
+                    factor = self.crop_max_side/longest
+                    crop = cv2.resize(crop, (max(1, round(crop.shape[1]*factor)), max(1, round(crop.shape[0]*factor))),
+                                      interpolation=cv2.INTER_AREA)
                 self.stats["crops"] += 1
                 for candidate in self.secondary.detect(crop, timestamp_s):
                     candidate = map_crop_detection(candidate, box, width, height, origin)

@@ -649,6 +649,14 @@ function indexAt(t) {
 // Middle of frame i's display interval. Seeking a video there shows exactly that frame (no rounding at frame boundaries).
 function frameMid(i) { const next = i + 1 < S.times.length ? S.times[i + 1] : S.times[i] + 1 / S.fps; return (S.times[i] + next) / 2; }
 function inData(t) { return S.frames.length > 0 && t >= S.tStart - 1e-6 && t <= S.tEnd + 1e-3; }
+// Presented-frame clock (see tick). Registered once on the shared <video> element.
+(function watchPresentedFrames() {
+  const v = document.getElementById('video');
+  if (!v || !v.requestVideoFrameCallback) return;            // older browsers: fall back to currentTime
+  const cb = (now, md) => { S.presentedT = md.mediaTime; S.dirty = true; v.requestVideoFrameCallback(cb); };
+  v.requestVideoFrameCallback(cb);
+  for (const e of ['seeking', 'emptied', 'loadstart']) v.addEventListener(e, () => { S.presentedT = null; });
+})();
 function seek(t) {
   S.t = clamp(t, S.tStart, Math.max(S.tStart, S.tEnd - 1e-3));
   S.idx = indexAt(S.t);
@@ -1484,7 +1492,10 @@ function tick(now) {
   if (S.playing) {
     if (S.video && S.video.ended) setPlaying(false);
     else {
-      if (S.video && !S.video.paused) S.t = S.video.currentTime + (S.videoOffset || 0);   // videoOffset: video starts at run time videoOffset (backend proxy); 0 for local files
+      // One clock: the media time of the frame the browser actually PRESENTED (requestVideoFrameCallback).
+      // video.currentTime runs ahead of the displayed frame, which drew landmarks of a different frame than
+      // the image underneath (measured: 173 of 179 presented frames). videoOffset: proxy starts at run time videoOffset.
+      if (S.video && !S.video.paused) S.t = (S.presentedT ?? S.video.currentTime) + (S.videoOffset || 0);
       else S.t += ((now - S.lastTick) / 1000) * S.speed;
       S.lastTick = now;
       if (S.t >= S.tEnd) { S.t = S.tEnd - 1e-3; setPlaying(false); }

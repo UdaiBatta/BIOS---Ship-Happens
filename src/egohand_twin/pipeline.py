@@ -145,6 +145,12 @@ def process(args):
                                          crop_max_side=getattr(args, "crop_max_side", None), **options)
         else:
             detector = Detector(Path(args.model), **options)
+        preset = getattr(args, "preset", None)
+        subtitle = ("FACTORY POV  /  MEDIAPIPE  /  " +
+                    (f"PRESET {preset.upper()}" if preset else "CUSTOM SETTINGS") +
+                    f"  (thresholds {args.detection_threshold:g}" +
+                    (", centre-crop rescue)" if args.rescue_crop else
+                     f", crops: {args.rescue})" if getattr(args, "rescue", None) else ", no crops)"))
         if not args.no_video:
             video_sink = VideoSink(out/"preview.mp4", info["fps"]/args.stride)
         if args.rrd:
@@ -248,7 +254,7 @@ def process(args):
                 stages["export_rows"] += time.perf_counter() - mark
                 mark = time.perf_counter()
                 if video_sink:
-                    rendered = composite(frame, sample)
+                    rendered = composite(frame, sample, subtitle)
                     video_sink.write(rendered)
                     if len(detections) > best_poster_hands:
                         cv2.imwrite(str(out/"preview.jpg"), rendered)

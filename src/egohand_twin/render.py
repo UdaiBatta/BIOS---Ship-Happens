@@ -63,8 +63,12 @@ def overlay(frame, hands):
             continue
         points = np.asarray(hand["image_xyz"])[:, :2] * [w, h]
         draw_hand(image, points, color(hand), max(2, w//300), not hand["observed"])
-        anchor = np.clip(points[0].astype(int), [0, 25], [w-420, h-10])
-        text(image, hand_label(hand), int(anchor[0]), int(anchor[1]), .55, color(hand), 2)
+        anchor = np.clip(points[0].astype(int), [0, 25], [w-int(420*max(1., w/960)), h-10])
+        # Scale text with the frame so labels stay legible after fitting into the panel.
+        scale = max(1., w/960)
+        thickness = max(2, round(2*scale))
+        text(image, hand_label(hand), int(anchor[0]), int(anchor[1]), .55*scale, (0, 0, 0), thickness+3)  # outline
+        text(image, hand_label(hand), int(anchor[0]), int(anchor[1]), .55*scale, color(hand), thickness)
     return image
 
 
@@ -78,10 +82,10 @@ def fit_image(image, width, height):
     return canvas
 
 
-def composite(frame, sample):
+def composite(frame, sample, subtitle="FACTORY POV  /  MEDIAPIPE HAND LANDMARKER"):
     canvas = np.full((900, 1600, 3), BG, np.uint8)
     text(canvas, "EGOHAND TWIN", 28, 47, 1.15, TEXT, 2)
-    text(canvas, "FACTORY POV  /  MEDIAPIPE BASELINE", 30, 78, .55, MUTED)
+    text(canvas, subtitle, 30, 78, .55, MUTED)
     text(canvas, f'{sample["timestamp_s"]:08.3f}s  |  frame {sample["frame_index"]}',
          1120, 45, .65, MUTED)
     text(canvas, "SOURCE + 2D LANDMARKS  /  ESTIMATED SIDE", 28, 115, .6, MUTED)

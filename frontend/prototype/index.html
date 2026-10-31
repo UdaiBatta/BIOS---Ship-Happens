@@ -195,6 +195,7 @@
   <span class="sep"></span>
   <label class="btn" title="Load a landmarks.jsonl file from this laptop">Load JSONL<input type="file" id="fileJsonl" accept=".jsonl,.json,.txt"></label>
   <label class="btn" title="Play a local video in sync. Stays on this laptop.">Load video<input type="file" id="fileVideo" accept="video/*"></label>
+  <label class="btn" title="Add pipeline results for the loaded clip (several files at once): lift_*.npz + lift_*.json (camera-space 3D), identity.json (left/right per track), mesh_*.npz / .json / .jsonl (WiLoR or HaMeR meshes). Read locally, never uploaded.">Add results<input type="file" id="fileResults" accept=".npz,.json,.jsonl" multiple></label>
   <button class="btn" id="btnDemo" title="Back to the synthetic demo data">Synthetic demo</button>
 </div>
 
@@ -215,10 +216,16 @@
       <span class="badge" id="threeBadge">Camera-space estimate (approx. lens model)</span>
       <span class="hint" id="threeHint"></span>
     </div>
-    <div class="legend" style="margin-top: 8px">
+    <div class="legend" style="margin-top: 8px; align-items: center">
+      <div class="seg" id="segDisplay" role="group" aria-label="Hand display in 3D">
+        <button data-v="skeleton" aria-pressed="false">Skeleton</button>
+        <button data-v="mesh" aria-pressed="false">Mesh</button>
+        <button data-v="both" aria-pressed="true">Mesh + skeleton</button>
+      </div>
       <label><input type="checkbox" id="chkTrails" checked> wrist trails (2 s)</label>
       <label><input type="checkbox" id="chkGripper" checked> robot gripper (follows wrist, opens with grip aperture)</label>
     </div>
+    <div class="legend note" id="meshNote"></div>
   </section>
 
   <section class="panel" id="p-lanes" aria-label="Reliability timeline">
@@ -290,6 +297,8 @@ const HAS_3D = new Set(['observed', 'reacquired']);
 const PLAUSIBLE_DEPTH = [0.2, 0.9];  // metres, from the plan's plausibility check
 const REPROJ_THRESHOLD_PX = 8;       // prototype value for the "3D valid" mask
 const TRAIL_S = 2.0;
+const DEFAULT_CAMERA = { hfov: 128, vfov: 67, label: 'assumed 128° × 67° FOV' };
+const MIN_MESH_GAP_S = 0.2;          // shorter mesh gaps stay visible in the Mesh lane but are not listed as events
 
 /* ------------------------------------------------------------------ app state */
 const S = {
@@ -298,6 +307,8 @@ const S = {
   mode: 'ours', smooth: true, synthetic: true, clipId: 'synthetic_demo',
   lanes: null, series: null, events: [], eventFilter: 'all', breakdown: null,
   orbit: { yaw: -0.12, pitch: 0.62, dist: 0.9 }, video: null, dirty: true,
+  camera: { ...DEFAULT_CAMERA }, lift: null, sideSource: null,
+  mesh: null, display: 'both', meshCoverage: null,
 };
 
 /* ------------------------------------------------------------------ small helpers */
@@ -428,6 +439,115 @@ function makeSynthetic() {
   return frames;
 }
 
+/* ================================================================== MESHES (WiLoR / HaMeR, or a synthetic stand-in)
+   S.mesh = { backend, label, licence, synthetic, faces: Uint32Array, nv, byKey: Map("frame:track" -> { v: Float32Array(nv*3), gap_m }) }
+   Vertices are camera-frame metres (x right, y down, z forward), already placed by the pipeline (mesh-place).
+   Meshes exist only for observed / reacquired hands; every other hand falls back to its skeleton. */
+const meshKey = (frameIndex, trackId) => `${frameIndex}:${trackId}`;
+function meshFor(frame, hand) { return S.mesh && frame && hand ? S.mesh.byKey.get(meshKey(frame.frame_index, hand.track_id)) || null : null; }
+// Stand-in geometry: tapered tubes around the 21-point skeleton plus a palm. It lets the mesh view be demonstrated
+// without licensed MANO assets. It is NOT a MANO, WiLoR or HaMeR output.
+const TUBE_K = 6;
+const JOINT_R = [0.014, 0.013, 0.011, 0.0095, 0.008, 0.0105, 0.0095, 0.0085, 0.0075, 0.0105, 0.0095, 0.0085, 0.0075,
+  0.0100, 0.0090, 0.0080, 0.0072, 0.0090, 0.0080, 0.0072, 0.0065];
+const STANDIN = (() => {
+  const faces = [], ring = 2 * TUBE_K;
+  BONES.forEach((_, b) => { const o = b * ring; for (let k = 0; k < TUBE_K; k++) { const k2 = (k + 1) % TUBE_K; faces.push(o + k, o + k2, o + TUBE_K + k, o + k2, o + TUBE_K + k2, o + TUBE_K + k); } });
+  const pj = BONES.length * ring;   // palm triangles use the 21 joints, appended after the tube rings
+  for (const [a, b, c] of [[0, 1, 5], [0, 5, 9], [0, 9, 13], [0, 13, 17]]) faces.push(pj + a, pj + b, pj + c);
+  return { faces: Uint32Array.from(faces), nv: pj + 21 };
+})();
+function standInVertices(J) {
+  const v = new Float32Array(STANDIN.nv * 3); let o = 0;
+  for (const [a, b] of BONES) {
+    const d = norm(sub(J[b], J[a])), u = norm(cross(d, Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), w = cross(d, u);
+    for (const j of [a, b]) for (let k = 0; k < TUBE_K; k++) {
+      const t = (2 * Math.PI * k) / TUBE_K, c = Math.cos(t) * JOINT_R[j], sn = Math.sin(t) * JOINT_R[j];
+      for (let x = 0; x < 3; x++) v[o++] = J[j][x] + u[x] * c + w[x] * sn;
+    }
+  }
+  for (const p of J) { v[o++] = p[0]; v[o++] = p[1]; v[o++] = p[2]; }
+  return v;
+}
+function makeStandInMeshes(frames) {
+  const rnd = mulberry32(11), byKey = new Map();
+  for (const f of frames) for (const h of f.hands) {
+    if (!HAS_3D.has(h.state) || !h.cam_xyz_m || h.anatomical_side === 'other') continue;
+    const blurry = f.quality && f.quality.blur_laplacian_var != null && f.quality.blur_laplacian_var < 80;
+    if (blurry || (h.anatomical_side === 'wearer_left' && f.timestamp_s >= 9 && f.timestamp_s < 10.5)) continue; // simulated mesh failures
+    byKey.set(meshKey(f.frame_index, h.track_id), { v: standInVertices(h.cam_xyz_m), gap_m: Math.abs(0.012 + (rnd() - 0.5) * 0.016), sign: 0 });
+    h.mesh_ref = meshKey(f.frame_index, h.track_id);
+  }
+  return { backend: 'stand-in', label: 'Synthetic stand-in mesh (tubes around the skeleton) · not MANO, not WiLoR or HaMeR', licence: null,
+    synthetic: true, faces: STANDIN.faces, nv: STANDIN.nv, byKey };
+}
+const MESH_LICENCE = (backend) => /wilor/i.test(backend) ? 'WiLoR: CC BY-NC-ND 4.0 + MANO licence · non-commercial use only'
+  : /hamer/i.test(backend) ? 'HaMeR code: MIT + MANO licence · non-commercial use only' : 'Check the model and MANO licences before sharing';
+// Mesh files written by the pipeline. NPZ arrays: frame_index (n), track_id (n), vertices_cam_m (n,V,3), faces (F,3);
+// optional ok (n), backend (string), depth_gap_m (n) or model_depth_m + pnp_depth_m (n).
+function meshFromArrays(a, name) {
+  for (const k of ['frame_index', 'track_id', 'vertices_cam_m', 'faces']) if (!a[k]) throw new Error(`missing array ${k}`);
+  const vs = a.vertices_cam_m.shape;
+  if (vs.length !== 3 || vs[2] !== 3) throw new Error('vertices_cam_m must have shape (n, V, 3)');
+  if (a.faces.shape.length !== 2 || a.faces.shape[1] !== 3) throw new Error('faces must have shape (F, 3)');
+  const [n, V] = vs, data = a.vertices_cam_m.data, at = (arr, i) => (arr ? Number(arr.data[i]) : NaN);
+  const records = [];
+  for (let i = 0; i < n; i++) {
+    const gap = a.depth_gap_m ? at(a.depth_gap_m, i) : Math.abs(at(a.model_depth_m, i) - at(a.pnp_depth_m, i));
+    records.push({ frame_index: Number(a.frame_index.data[i]), track_id: Number(a.track_id.data[i]), ok: a.ok ? !!a.ok.data[i] : true,
+      v: Float32Array.from(data.subarray(i * V * 3, (i + 1) * V * 3)), gap_m: Number.isFinite(gap) ? gap : null });
+  }
+  const backend = a.backend ? String(a.backend.data[0]) : /hamer/i.test(name) ? 'hamer' : /wilor/i.test(name) ? 'wilor' : 'mesh';
+  return { backend, faces: Uint32Array.from(a.faces.data), nv: V, records };
+}
+// JSON: { backend, faces: [[i,j,k]...], meshes: [{ frame_index, track_id, vertices_cam_m: [[x,y,z]...], ok?, depth_gap_m? }] }
+// JSONL: first line { "type": "mesh_header", backend, faces }, then one mesh record per line.
+function meshFromRecords(header, recs, name) {
+  if (!Array.isArray(header.faces) || !header.faces.length) throw new Error('mesh header has no faces');
+  const faces = Uint32Array.from(header.faces.flat()), nv = recs.length ? recs[0].vertices_cam_m.length : 0;
+  const records = recs.map((r) => {
+    const gap = r.depth_gap_m ?? (r.model_depth_m != null && r.pnp_depth_m != null ? Math.abs(r.model_depth_m - r.pnp_depth_m) : null);
+    return { frame_index: r.frame_index, track_id: r.track_id, ok: r.ok !== false, v: Float32Array.from((r.vertices_cam_m || []).flat()), gap_m: gap };
+  });
+  return { backend: header.backend || (/hamer/i.test(name) ? 'hamer' : /wilor/i.test(name) ? 'wilor' : 'mesh'), faces, nv, records };
+}
+// Signed volume decides which way a mesh's triangles face (mirrored left hands flip it). Near-zero volume = open or
+// inconsistent surface: draw both sides. A real hand is a few hundred cm³; 20 cm³ is the cut-off.
+function windingSign(v, faces) {
+  let vol = 0;
+  for (let t = 0; t < faces.length; t += 3) {
+    const a = 3 * faces[t], b = 3 * faces[t + 1], c = 3 * faces[t + 2];
+    vol += v[a] * (v[b + 1] * v[c + 2] - v[b + 2] * v[c + 1]) - v[a + 1] * (v[b] * v[c + 2] - v[b + 2] * v[c]) + v[a + 2] * (v[b] * v[c + 1] - v[b + 1] * v[c]);
+  }
+  vol /= 6;
+  return Math.abs(vol) < 2e-5 ? 0 : Math.sign(vol);
+}
+function applyMesh(m, name) {
+  if (m.faces.some((i) => i >= m.nv)) throw new Error('a face index points past the vertex count');
+  for (const f of S.frames) for (const h of f.hands) delete h.mesh_ref;
+  const byFrame = new Map(S.frames.map((f) => [f.frame_index, f])), byKey = new Map();
+  let failed = 0, notObserved = 0, unmatched = 0, bad = 0;
+  for (const r of m.records) {
+    if (!r.ok) { failed++; continue; }
+    const f = byFrame.get(r.frame_index), h = f && f.hands.find((x) => x.track_id === r.track_id);
+    if (!h) { unmatched++; continue; }
+    if (!HAS_3D.has(h.state)) { notObserved++; continue; }        // never show a mesh for a predicted or lost hand
+    if (r.v.length !== m.nv * 3 || !r.v.every(Number.isFinite)) { bad++; continue; }
+    byKey.set(meshKey(r.frame_index, r.track_id), { v: r.v, gap_m: r.gap_m, sign: windingSign(r.v, m.faces) });
+    h.mesh_ref = meshKey(r.frame_index, r.track_id);
+  }
+  S.mesh = { backend: m.backend, label: `${m.backend} meshes from ${name} (camera frame, placed by the pipeline)`, licence: MESH_LICENCE(m.backend),
+    synthetic: false, faces: m.faces, nv: m.nv, byKey };
+  return `${byKey.size} ${m.backend} meshes` + (failed ? `, ${failed} marked failed` : '') + (notObserved ? `, ${notObserved} skipped (hand not observed)` : '') +
+    (unmatched ? `, ${unmatched} not in the loaded frames` : '') + (bad ? `, ${bad} with bad vertices` : '');
+}
+function renderMeshNote() {
+  const n = $('meshNote');
+  const gaps = S.mesh && S.shortMeshGaps ? ` ${S.shortMeshGaps} gaps shorter than ${MIN_MESH_GAP_S} s are shown in the Mesh lane only.` : '';
+  n.textContent = S.mesh ? `Meshes: ${S.mesh.label}${S.mesh.licence ? ' · ' + S.mesh.licence : ''}. Shown in camera-space view only; hands without a mesh keep their skeleton.${gaps}`
+    : 'No meshes loaded. Add mesh_*.npz from the WiLoR / HaMeR step with "Add results". Hands keep their skeleton.';
+}
+
 /* ================================================================== DERIVED DATA */
 function handFor(frame, side) {
   let best = null;
@@ -449,10 +569,11 @@ function deriveAll() {
   // Frame masks: use the file's masks when present, otherwise compute them the same way the pipeline should.
   for (const f of F) {
     f.quality = f.quality || {};
-    const m = f.quality.masks = Object.assign({}, f.quality.masks || {});
+    const m = f.quality.masks = Object.assign({}, f._fileMasks || {});
     if (m.hand_observed === undefined) m.hand_observed = (f.hands || []).some((h) => HAS_3D.has(h.state));
     if (m.low_blur === undefined) m.low_blur = f.quality.blur_laplacian_var == null ? null : f.quality.blur_laplacian_var >= 80;
     if (m.cam_space_valid === undefined) m.cam_space_valid = (f.hands || []).some((h) => h.cam_xyz_m && h.quality && h.quality.reprojection_error_px != null && h.quality.reprojection_error_px < REPROJ_THRESHOLD_PX);
+    for (const k of Object.keys(m)) if (typeof m[k] !== 'boolean') delete m[k];   // unknown = absent (schema masks are booleans)
   }
 
   // Lanes
@@ -463,6 +584,14 @@ function deriveAll() {
   if (hasOther) lanes.push({ key: 'other', label: 'Other people', kind: 'hand', side: 'other', values: F.map((f) => laneState(handFor(f, 'other'))) });
   lanes.push({ key: 'low_blur', label: 'Low blur', kind: 'mask', values: F.map((f) => f.quality.masks.low_blur) });
   lanes.push({ key: 'cam_space_valid', label: '3D valid', kind: 'mask', values: F.map((f) => f.quality.masks.cam_space_valid) });
+  let meshObserved = 0, meshShown = 0;
+  if (S.mesh) lanes.push({ key: 'mesh', label: 'Mesh', kind: 'mesh', values: F.map((f) => {
+    const obs = f.hands.filter((h) => HAS_3D.has(h.state) && h.anatomical_side !== 'other');
+    if (!obs.length) return null;
+    const c = obs.filter((h) => meshFor(f, h)).length; meshObserved += obs.length; meshShown += c;
+    return c === obs.length ? 'all' : c === 0 ? 'none' : 'some';
+  }) });
+  S.meshCoverage = S.mesh && meshObserved ? meshShown / meshObserved : null;
   for (const L of lanes) L.runs = toRuns(L.values);
   S.lanes = lanes;
 
@@ -473,6 +602,7 @@ function deriveAll() {
       reproj: F.map((f) => { const h = handFor(f, side); return h && h.quality && HAS_3D.has(h.state) ? h.quality.reprojection_error_px ?? null : null; }),
       aperture: F.map((f) => { const h = handFor(f, side); return h && HAS_3D.has(h.state) ? h.grip_aperture_m ?? null : null; }),
       depth: F.map((f) => { const h = handFor(f, side); return h && HAS_3D.has(h.state) ? wristDepth(h) : null; }),
+      meshGap: F.map((f) => { const h = handFor(f, side), m = h && HAS_3D.has(h.state) ? meshFor(f, h) : null; return m && m.gap_m != null ? m.gap_m * 100 : null; }),
     };
   }
 
@@ -507,6 +637,14 @@ function deriveEvents(F, lanes) {
         if (v === 'lost') ev.push({ type: 'hand_lost', severity: 'warn', label: `${who} lost`, side: L.side, i0: r.i0, i1: r.i1 });
         if (v === 'retired') ev.push({ type: 'track_retired', severity: 'info', label: `${who}: track ended`, side: L.side, i0: r.i0, i1: r.i1 });
         prev = v;
+      }
+    } else if (L.kind === 'mesh') {
+      S.shortMeshGaps = 0;
+      for (const r of L.runs) {
+        if (r.v !== 'none' && r.v !== 'some') continue;
+        if (end(r.i1) - T(r.i0) < MIN_MESH_GAP_S) { S.shortMeshGaps++; continue; }
+        ev.push({ type: 'mesh_missing', severity: 'warn',
+          label: r.v === 'none' ? 'No mesh for the observed hands (skeleton shown)' : 'Mesh missing for one observed hand (skeleton shown)', i0: r.i0, i1: r.i1 });
       }
     } else {
       for (const r of L.runs) if (r.v === false) ev.push({ type: L.key === 'low_blur' ? 'low_quality_blur' : 'cam_space_invalid', severity: 'warn', label: L.key === 'low_blur' ? 'Low quality (blur)' : '3D not valid (reprojection error ≥ threshold or no hand)', i0: r.i0, i1: r.i1 });
@@ -630,6 +768,7 @@ function drawThree() {
     g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke(); g.restore();
   };
   const ours = S.mode === 'ours';
+  const placed = [];   // label rectangles already drawn (tags avoid them)
   // Bench grid (y down: the plane sits below the camera), 10 cm spacing
   const GY = 0.36;
   for (let x = -0.6; x <= 0.601; x += 0.1) seg([x, GY, 0], [x, GY, 1.3], COLOR.grid, 1);
@@ -637,18 +776,20 @@ function drawThree() {
   if (ours) {
     // Plausible depth band edges
     for (const z of PLAUSIBLE_DEPTH) { seg([-0.6, GY, z], [0.6, GY, z], COLOR.axis, 1.5); const L = P([0.6, GY, z]); g.fillStyle = COLOR.muted; g.font = '11px ' + C('--font'); g.fillText(`${z} m`, L[0] + 4, L[1] + 4); }
-    // Camera frustum (assumed 128° × 67° FOV), drawn to 0.12 m
-    const zf = 0.12, xf = Math.tan(64 * Math.PI / 180) * zf, yf = Math.tan(33.5 * Math.PI / 180) * zf;
+    // Camera frustum from the current (assumed) lens model, drawn to 0.12 m; half-angles clipped at 75° so wide lenses stay drawable
+    const half = (deg) => Math.tan(Math.min(deg / 2, 75) * Math.PI / 180);
+    const zf = 0.12, xf = half(S.camera.hfov) * zf, yf = half(S.camera.vfov) * zf;
     const corners = [[-xf, -yf, zf], [xf, -yf, zf], [xf, yf, zf], [-xf, yf, zf]];
     for (const c of corners) seg([0, 0, 0], c, COLOR.muted, 1, 0.8);
     for (let i = 0; i < 4; i++) seg(corners[i], corners[(i + 1) % 4], COLOR.muted, 1, 0.8);
     const O = P([0, 0, 0]); g.beginPath(); g.moveTo(O[0], O[1] - 7); g.lineTo(O[0] - 7, O[1] + 6); g.lineTo(O[0] + 7, O[1] + 6); g.closePath(); g.fillStyle = COLOR.ink2; g.fill();
     g.fillStyle = COLOR.ink2; g.font = '11px ' + C('--font'); g.fillText('head camera', O[0] + 10, O[1] + 4);
+    placed.push({ x: O[0] + 6, y: O[1] - 8, w: g.measureText('head camera').width + 8, h: 16 });
   }
   const f = S.frames[S.idx]; if (!f) return;
   const missing = [];
   const BASE_ANCHOR = { wearer_left: [-0.13, 0.16, 0.42], wearer_right: [0.13, 0.16, 0.42], other: [0.36, 0.16, 0.42], unknown: [0, 0.16, 0.42] };
-  const drawList = [];
+  const drawList = [], overlay = [], eye = viewEye();
   for (const hnd of f.hands || []) {
     const side = hnd.anatomical_side, col = COLOR[side] || COLOR.other;
     let pts = null;
@@ -656,10 +797,21 @@ function drawThree() {
       if (ours) pts = S.smooth ? hnd.cam_xyz_m : (hnd.cam_xyz_m_raw || hnd.cam_xyz_m);
       else { const wp = S.smooth ? hnd.world_xyz_m : (hnd.world_xyz_m_raw || hnd.world_xyz_m); if (wp) pts = wp.map((p) => add(p, BASE_ANCHOR[side] || BASE_ANCHOR.unknown)); }
     }
-    if (!pts) { if (hnd.state !== 'retired') missing.push(`${SIDE_LABEL[side] || side}: ${hnd.state} → no 3D${hnd.state === 'predicted' ? ' (2D only)' : ''}`); continue; }
-    for (const [a, b] of BONES) { const A = P(pts[a]), B = P(pts[b]); drawList.push({ d: (A[2] + B[2]) / 2, kind: 'bone', A, B, col }); }
-    for (let j = 0; j < 21; j++) { const A = P(pts[j]); drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
-    drawList.push({ d: 0, kind: 'label', A: P(pts[0]), col, text: `${SIDE_LABEL[side] || side}${ours && hnd.wrist_pose_cam ? ` · ${num(hnd.wrist_pose_cam.t_m[2], 2)} m` : ''}` });
+    if (!pts) {
+      if (hnd.state !== 'retired') missing.push(HAS_3D.has(hnd.state)
+        ? `${SIDE_LABEL[side] || side}: ${hnd.state}, no ${ours ? 'camera-space' : 'hand-relative'} 3D`
+        : `${SIDE_LABEL[side] || side}: ${hnd.state} → no 3D${hnd.state === 'predicted' ? ' (2D only)' : ''}`);
+      continue;
+    }
+    const mesh = ours && S.display !== 'skeleton' ? meshFor(f, hnd) : null;
+    if (mesh) pushMesh(drawList, mesh, S.mesh.faces, col, P, eye);
+    if (!mesh) {   // skeleton (also the fallback when a hand has no mesh)
+      for (const [a, b] of BONES) { const A = P(pts[a]), B = P(pts[b]); drawList.push({ d: (A[2] + B[2]) / 2, kind: 'bone', A, B, col }); }
+      for (let j = 0; j < 21; j++) { const A = P(pts[j]); drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
+    } else if (S.display === 'both') overlay.push(pts.map(P));
+    const meshTag = ours && S.mesh && S.display !== 'skeleton' && side !== 'other' ? (mesh ? ` · ${S.mesh.synthetic ? 'stand-in mesh' : S.mesh.backend + ' mesh'}` : ' · no mesh (skeleton)') : '';
+    const depthTag = ours ? (hnd.wrist_pose_cam ? ` · ${num(hnd.wrist_pose_cam.t_m[2], 2)} m` : (S.lift && hnd.cam_xyz_m ? ` · ${num(hnd.cam_xyz_m[0][2], 2)} m` : '')) : '';
+    drawList.push({ d: 0, kind: 'label', A: P(pts[0]), col, text: `${SIDE_LABEL[side] || side}${depthTag}${meshTag}` });
     if (ours && $('chkGripper').checked && side !== 'other' && hnd.grip_aperture_m != null) drawGripper(g, P, pts, hnd.grip_aperture_m);
   }
   if (ours && $('chkTrails').checked) {
@@ -674,13 +826,51 @@ function drawThree() {
     }
   }
   drawList.sort((a, b) => b.d - a.d);
+  let triFill = null;   // open path of consecutive same-colour triangles (painter order is unchanged)
+  const flushTris = () => { if (triFill) { g.fillStyle = triFill; g.fill(); triFill = null; } };
   for (const it of drawList) {
+    if (it.kind === 'tri') {
+      if (it.fill !== triFill) { flushTris(); triFill = it.fill; g.beginPath(); }
+      // Grow each triangle ~0.4 px from its centre so anti-aliased seams between neighbours disappear without a stroke.
+      const [A, B, Cc] = it.pts, cx = (A[0] + B[0] + Cc[0]) / 3, cy = (A[1] + B[1] + Cc[1]) / 3;
+      const grow = (q) => { const dx = q[0] - cx, dy = q[1] - cy, l = Math.hypot(dx, dy) || 1; return [q[0] + 0.4 * dx / l, q[1] + 0.4 * dy / l]; };
+      const a = grow(A), bq = grow(B), c = grow(Cc);
+      g.moveTo(a[0], a[1]); g.lineTo(bq[0], bq[1]); g.lineTo(c[0], c[1]); g.closePath();
+      continue;
+    }
+    flushTris();
     if (it.kind === 'bone') { g.strokeStyle = it.col; g.lineWidth = 2.5; g.lineCap = 'round'; g.beginPath(); g.moveTo(it.A[0], it.A[1]); g.lineTo(it.B[0], it.B[1]); g.stroke(); }
     else if (it.kind === 'joint') { g.beginPath(); g.arc(it.A[0], it.A[1], it.r, 0, Math.PI * 2); g.fillStyle = it.col; g.fill(); g.lineWidth = 1.5; g.strokeStyle = '#121211'; g.stroke(); }
   }
-  const placed = [];
+  flushTris();
+  // "Mesh + skeleton": a thin ink skeleton drawn over the mesh so the landmarks stay visible
+  for (const S2 of overlay) {
+    g.save(); g.strokeStyle = 'rgba(240,239,236,0.85)'; g.lineWidth = 1.2; g.lineCap = 'round'; g.beginPath();
+    for (const [a, b] of BONES) { g.moveTo(S2[a][0], S2[a][1]); g.lineTo(S2[b][0], S2[b][1]); } g.stroke();
+    g.fillStyle = 'rgba(240,239,236,0.95)'; for (const A of S2) { g.beginPath(); g.arc(A[0], A[1], 1.8, 0, Math.PI * 2); g.fill(); } g.restore();
+  }
+  if (!ours && S.mesh) missing.push('meshes are shown in the camera-space view');
   for (const it of drawList) if (it.kind === 'label') drawTag(g, placed, it.A[0] + 10, it.A[1] + 18, w, h, it.text, it.col);
   $('threeHint').textContent = missing.join('   ·   ');
+}
+// Viewer position in camera coordinates (inverse of proj3's orbit rotation), used for simple Lambert shading.
+function viewEye() {
+  const o = S.orbit, cy = Math.cos(o.yaw), sy = Math.sin(o.yaw), cp = Math.cos(o.pitch), sp = Math.sin(o.pitch);
+  return [TARGET[0] + sy * cp * o.dist, TARGET[1] - sp * o.dist, TARGET[2] - cy * cp * o.dist];
+}
+function hexRgb(hex) { const v = parseInt(hex.replace('#', ''), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
+function pushMesh(list, mesh, faces, col, P, eye) {
+  const v = mesh.v, sign = mesh.sign || 0, n = v.length / 3, scr = new Array(n), [r, gg, b] = hexRgb(col);
+  for (let i = 0; i < n; i++) scr[i] = P([v[3 * i], v[3 * i + 1], v[3 * i + 2]]);
+  for (let t = 0; t < faces.length; t += 3) {
+    const ia = faces[t], ib = faces[t + 1], ic = faces[t + 2];
+    const A = [v[3 * ia], v[3 * ia + 1], v[3 * ia + 2]], B = [v[3 * ib], v[3 * ib + 1], v[3 * ib + 2]], Cc = [v[3 * ic], v[3 * ic + 1], v[3 * ic + 2]];
+    const nrm = norm(cross(sub(B, A), sub(Cc, A))), cen = mul(add(add(A, B), Cc), 1 / 3), facing = dot(nrm, norm(sub(eye, cen)));
+    if (sign && facing * sign < 0) continue;   // back face of a closed mesh
+    // Lambert shading, quantised to 16 levels so consecutive same-shade triangles can share one canvas path.
+    const k = 0.35 + 0.65 * Math.round(15 * Math.abs(facing)) / 15;
+    list.push({ kind: 'tri', d: (scr[ia][2] + scr[ib][2] + scr[ic][2]) / 3, pts: [scr[ia], scr[ib], scr[ic]], fill: `rgb(${(r * k) | 0},${(gg * k) | 0},${(b * k) | 0})` });
+  }
 }
 function drawGripper(g, P, pts, aperture) {
   // A simple two-finger gripper mounted above the wrist, aligned with the hand.
@@ -697,6 +887,7 @@ function drawGripper(g, P, pts, aperture) {
 const LANE = { labelW: 104, rowH: 16, gap: 8, top: 4, axisH: 22 };
 function laneFill(L, v) {
   if (L.kind === 'mask') return v === true ? { c: COLOR.good, a: 0.75 } : v === false ? { c: COLOR.critical, a: 0.75 } : null;
+  if (L.kind === 'mesh') return v === 'all' ? { c: COLOR.good, a: 0.75 } : v === 'some' ? { c: COLOR.warning, a: 0.85 } : v === 'none' ? { c: COLOR.critical, a: 0.75 } : null;
   const col = COLOR[L.side] || COLOR.other;
   if (v === 'observed') return { c: col, a: 1 };
   if (v === 'reacquired') return { c: COLOR.ink, a: 1 };
@@ -745,11 +936,13 @@ const SIG = [
   { key: 'aperture', label: 'Grip aperture (m)', fmt: (v) => num(v, 3) + ' m' },
   { key: 'depth', label: 'Wrist depth (m)', fmt: (v) => num(v, 2) + ' m', band: PLAUSIBLE_DEPTH },
 ];
+const MESH_SIG = { key: 'meshGap', label: 'Mesh vs PnP depth gap (cm)', fmt: (v) => num(v, 1) + ' cm' };
+function sigDefs() { return S.mesh && WEARER.some((sd) => S.series[sd].meshGap.some((v) => v != null)) ? [...SIG, MESH_SIG] : SIG; }
 const SG = { rowH: 70, gap: 34, top: 22, axisH: 22 };
 function sigRange(key) {
   let lo = Infinity, hi = -Infinity;
   for (const side of WEARER) for (const v of S.series[side][key]) if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-  const d = SIG.find((s) => s.key === key);
+  const d = sigDefs().find((s) => s.key === key);
   if (d.threshold != null) hi = Math.max(hi, d.threshold * 1.15);
   if (d.band) { lo = Math.min(lo, d.band[0]); hi = Math.max(hi, d.band[1]); }
   if (!isFinite(lo)) { lo = 0; hi = 1; }
@@ -758,10 +951,10 @@ function sigRange(key) {
   return [lo, hi + (hi - lo) * 0.05];
 }
 function drawSignals() {
-  const cv = $('cvSignals'), H = SG.top + SIG.length * (SG.rowH + SG.gap) + SG.axisH;
+  const defs = sigDefs(), cv = $('cvSignals'), H = SG.top + defs.length * (SG.rowH + SG.gap) + SG.axisH;
   const { g, w, h } = fit(cv, H);
   g.clearRect(0, 0, w, h);
-  SIG.forEach((d, k) => {
+  defs.forEach((d, k) => {
     const y0 = SG.top + k * (SG.rowH + SG.gap), [lo, hi] = sigRange(d.key), Y = (v) => y0 + SG.rowH - ((v - lo) / (hi - lo)) * SG.rowH;
     g.font = '11px ' + C('--font'); g.fillStyle = COLOR.ink2; g.textBaseline = 'bottom'; g.fillText(d.label, LANE.labelW, y0 - 8);
     // y ticks (3)
@@ -775,7 +968,7 @@ function drawSignals() {
       g.stroke();
     }
   });
-  const yA = SG.top + SIG.length * (SG.rowH + SG.gap) - SG.gap + 4;
+  const yA = SG.top + defs.length * (SG.rowH + SG.gap) - SG.gap + 4;
   g.strokeStyle = COLOR.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(LANE.labelW, yA); g.lineTo(w - 8, yA); g.stroke();
   drawTimeTicks(g, w, yA);
   drawPlayhead(g, xOfT(S.t, w), SG.top - 4, yA, null);
@@ -801,6 +994,8 @@ function laneTip(ev, i) {
     for (const L of S.lanes) {
       const v = L.values[i];
       if (L.kind === 'hand') { const hnd = handFor(S.frames[i], L.side); tipRow(t, COLOR[L.side] || COLOR.other, v === 'none' ? 'not in view' : v, L.label + (hnd && hnd.detection_origin ? ` · ${hnd.detection_origin.replace(/_/g, ' ')}` : ''), 'rect'); }
+      else if (L.kind === 'mesh') tipRow(t, v === 'all' ? COLOR.good : v === 'some' ? COLOR.warning : v === 'none' ? COLOR.critical : COLOR.muted,
+        v === 'all' ? '✓ every observed hand' : v === 'some' ? 'some hands only' : v === 'none' ? '✕ none (skeleton)' : 'no observed hand', L.label, 'rect');
       else tipRow(t, v === true ? COLOR.good : v === false ? COLOR.critical : COLOR.muted, v === true ? '✓ yes' : v === false ? '✕ no' : 'n/a', L.label, 'rect');
     }
   });
@@ -808,7 +1003,7 @@ function laneTip(ev, i) {
 function sigTip(ev, i) {
   showTip(ev, (t) => {
     t.append(el('div', { class: 't' }, `${fmtT(S.times[i])} · frame ${S.frames[i].frame_index}`));
-    for (const d of SIG) for (const side of WEARER) { const v = S.series[side][d.key][i]; tipRow(t, COLOR[side], v == null ? '—' : d.fmt(v), `${SIDE_LABEL[side]} · ${d.label.replace(/ \(.*\)/, '')}`); }
+    for (const d of sigDefs()) for (const side of WEARER) { const v = S.series[side][d.key][i]; tipRow(t, COLOR[side], v == null ? '—' : d.fmt(v), `${SIDE_LABEL[side]} · ${d.label.replace(/ \(.*\)/, '')}`); }
   });
 }
 function bindChart(cv, onHover, onLeave) {
@@ -823,9 +1018,11 @@ function renderChips() {
   const chip = (label, value, cls = '') => { const e = el('span', { class: 'chip ' + cls }); e.append(document.createTextNode(label + ' '), el('b', {}, value)); c.append(e); };
   if (S.synthetic) { const e = el('span', { class: 'chip warn' }, '⚠ SYNTHETIC DATA · not measured'); c.append(e); }
   chip('Coverage', S.coverage == null ? '[MEASURE]' : `${(S.coverage * 100).toFixed(1)}% of frames${S.synthetic ? ' (synthetic)' : ''}`, S.coverage == null ? 'measure' : '');
+  if (S.mesh) chip('Meshes', S.meshCoverage == null ? '—' : `${(S.meshCoverage * 100).toFixed(S.meshCoverage < 0.1 ? 1 : 0)}% of observed hands · ${S.mesh.synthetic ? 'synthetic stand-in' : S.mesh.backend}`);
   chip('Recall', '[MEASURE]', 'measure');
   chip('FPS', '[MEASURE]', 'measure');
-  const m = el('span', { class: 'chip mode' }, S.mode === 'ours' ? 'Camera-space estimate (approx. lens model)' : 'Hand-relative 3D · not placed in space'); c.append(m);
+  const m = el('span', { class: 'chip mode' }, S.mode !== 'ours' ? 'Hand-relative 3D · not placed in space'
+    : S.lift ? 'Camera space · assumed lens · experimental' : 'Camera-space estimate (approx. lens model)'); c.append(m);
 }
 function renderBreakdown() {
   const b = $('breakdown'); b.replaceChildren();
@@ -846,6 +1043,7 @@ function renderBreakdown() {
   item({ background: COLOR.ink }, 'reacquired'); item({ background: COLOR.wearer_right, opacity: '0.38' }, 'predicted · 2D only');
   item({ background: '#121211', outline: `1px solid ${COLOR.axis}` }, 'lost / not in view');
   item({ background: COLOR.good, opacity: '0.75' }, '✓ mask true'); item({ background: COLOR.critical, opacity: '0.75' }, '✕ mask false');
+  if (S.mesh) item({ background: COLOR.warning, opacity: '0.85' }, 'mesh for some hands only');
 }
 function renderInspector() {
   const f = S.frames[S.idx], box = $('inspector'); box.replaceChildren(); if (!f) return;
@@ -869,8 +1067,11 @@ function renderInspector() {
     ['Bone-length CV', (h) => h.quality && h.quality.bone_length_cv != null ? num(h.quality.bone_length_cv, 3) : '—'],
     ['Depth plausible', (h) => h.quality && h.quality.depth_plausible != null ? (h.quality.depth_plausible ? '✓ yes' : '✕ no') : '—'],
     ['P(right)', (h) => h.side_probability_right == null ? '—' : num(h.side_probability_right, 2)],
+    ['Side from', (h) => h._side_source || (S.synthetic ? 'synthetic' : 'file')],
     ['Confidence', (h) => h.confidence == null ? 'none (not calibrated)' : num(h.confidence, 2)],
     ['3D source', (h) => h.provenance && h.provenance.cam_xyz_m ? h.provenance.cam_xyz_m : '—'],
+    ['Mesh', (h) => { const m = meshFor(f, h); return m ? (S.mesh.synthetic ? 'stand-in (synthetic)' : `✓ ${S.mesh.backend}`) : S.mesh && HAS_3D.has(h.state) && h.anatomical_side !== 'other' ? 'none (skeleton)' : '—'; }],
+    ['Mesh–PnP depth gap', (h) => { const m = meshFor(f, h); return m && m.gap_m != null ? num(m.gap_m * 100, 1) + ' cm' : '—'; }],
   ];
   for (const [lab, fn] of rows) { const tr = el('tr'); tr.append(el('td', { class: 'k' }, lab)); for (const h of hands) tr.append(el('td', {}, fn(h))); tb.append(tr); }
   box.append(t2);
@@ -909,7 +1110,8 @@ function exportEvents() {
   const rows = [cols.join(',')].concat(S.events.map((e) => cols.map((c) => csvCell(typeof e[c] === 'number' ? e[c].toFixed(3) : e[c])).join(',')));
   download(`${S.clipId}_events.csv`, rows.join('\n') + '\n', 'text/csv');
 }
-function exportJsonl() { download(`${S.clipId}_landmarks.jsonl`, S.frames.map((f) => JSON.stringify(f)).join('\n') + '\n', 'application/x-ndjson'); }
+const dropInternal = (k, v) => (k.startsWith('_') ? undefined : v);
+function exportJsonl() { download(`${S.clipId}_landmarks.jsonl`, S.frames.map((f) => JSON.stringify(f, dropInternal)).join('\n') + '\n', 'application/x-ndjson'); }
 // Project Aria MPS hand-tracking column layout. Aria landmark order differs from MediaPipe: remap, and add a palm centre.
 const ARIA_FROM_MP = [4, 8, 12, 16, 20, 0, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19, null];
 function exportAria() {
@@ -936,14 +1138,193 @@ function exportAria() {
   download(`${S.clipId}_hand_tracking_results.csv`, lines.join('\n') + '\n', 'text/csv');
 }
 
+/* ================================================================== NPZ READER (numpy .npz = zip of .npy files) */
+async function readNpz(buffer) {
+  const dv = new DataView(buffer), u8 = new Uint8Array(buffer);
+  let eocd = -1;
+  for (let i = buffer.byteLength - 22; i >= Math.max(0, buffer.byteLength - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('not a .npz (zip) file');
+  let count = dv.getUint16(eocd + 10, true), cd = dv.getUint32(eocd + 16, true);
+  if (cd === 0xffffffff || count === 0xffff) {                      // ZIP64 end of central directory
+    const loc = eocd - 20; if (loc < 0 || dv.getUint32(loc, true) !== 0x07064b50) throw new Error('bad ZIP64 locator');
+    const z = Number(dv.getBigUint64(loc + 8, true)); count = Number(dv.getBigUint64(z + 32, true)); cd = Number(dv.getBigUint64(z + 48, true));
+  }
+  const arrays = {};
+  for (let k = 0; k < count; k++) {
+    if (dv.getUint32(cd, true) !== 0x02014b50) throw new Error('bad zip central directory');
+    const method = dv.getUint16(cd + 10, true), nlen = dv.getUint16(cd + 28, true), elen = dv.getUint16(cd + 30, true), clen = dv.getUint16(cd + 32, true);
+    let csize = dv.getUint32(cd + 20, true), usize = dv.getUint32(cd + 24, true), lho = dv.getUint32(cd + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(cd + 46, cd + 46 + nlen));
+    for (let e = cd + 46 + nlen; e + 4 <= cd + 46 + nlen + elen;) {  // ZIP64 extra field: real sizes / offset
+      const id = dv.getUint16(e, true), size = dv.getUint16(e + 2, true); let q = e + 4;
+      if (id === 1) {
+        if (usize === 0xffffffff) { usize = Number(dv.getBigUint64(q, true)); q += 8; }
+        if (csize === 0xffffffff) { csize = Number(dv.getBigUint64(q, true)); q += 8; }
+        if (lho === 0xffffffff) { lho = Number(dv.getBigUint64(q, true)); q += 8; }
+      }
+      e += 4 + size;
+    }
+    cd += 46 + nlen + elen + clen;
+    if (dv.getUint32(lho, true) !== 0x04034b50) throw new Error('bad zip local header');
+    const start = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true);
+    let data = u8.subarray(start, start + csize);
+    if (method === 8) data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    else if (method !== 0) throw new Error(`unsupported zip compression method ${method}`);
+    if (name.endsWith('.npy')) arrays[name.slice(0, -4)] = parseNpy(data);
+  }
+  return arrays;
+}
+function halfToFloat(h) {
+  const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff;
+  if (e === 0) return s * Math.pow(2, -14) * (f / 1024);
+  if (e === 31) return f ? NaN : s * Infinity;
+  return s * Math.pow(2, e - 15) * (1 + f / 1024);
+}
+function parseNpy(u8) {
+  if (u8[0] !== 0x93 || String.fromCharCode(...u8.subarray(1, 6)) !== 'NUMPY') throw new Error('not an .npy array');
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), major = u8[6];
+  const hl = major === 1 ? dv.getUint16(8, true) : dv.getUint32(8, true), h0 = major === 1 ? 10 : 12;
+  const header = new TextDecoder('latin1').decode(u8.subarray(h0, h0 + hl));
+  const descr = (/'descr':\s*'([^']+)'/.exec(header) || [])[1] || '';
+  if (/'fortran_order':\s*True/.test(header)) throw new Error('Fortran-ordered arrays are not supported');
+  if (descr[0] === '>') throw new Error('big-endian arrays are not supported');
+  const shape = (((/'shape':\s*\(([^)]*)\)/.exec(header) || [])[1]) || '').split(',').map((v) => v.trim()).filter(Boolean).map(Number);
+  const n = shape.reduce((a, b) => a * b, 1), body = u8.slice(h0 + hl).buffer;  // slice() copies, so typed views are aligned
+  const kind = descr.slice(1), toNum = (big) => { const out = new Float64Array(n); for (let i = 0; i < n; i++) out[i] = Number(big[i]); return out; };
+  let data;
+  switch (kind) {
+    case 'f4': data = new Float32Array(body, 0, n); break;
+    case 'f8': data = new Float64Array(body, 0, n); break;
+    case 'f2': { const h = new Uint16Array(body, 0, n); data = new Float32Array(n); for (let i = 0; i < n; i++) data[i] = halfToFloat(h[i]); break; }
+    case 'i8': data = toNum(new BigInt64Array(body, 0, n)); break;
+    case 'u8': data = toNum(new BigUint64Array(body, 0, n)); break;
+    case 'i4': data = new Int32Array(body, 0, n); break;
+    case 'u4': data = new Uint32Array(body, 0, n); break;
+    case 'i2': data = new Int16Array(body, 0, n); break;
+    case 'u2': data = new Uint16Array(body, 0, n); break;
+    case 'i1': data = new Int8Array(body, 0, n); break;
+    case 'u1': case 'b1': data = new Uint8Array(body, 0, n); break;
+    default:
+      if (/^U\d+$/.test(kind)) {                                       // numpy unicode strings (UTF-32)
+        const w = +kind.slice(1), cps = new Uint32Array(body, 0, n * w); data = [];
+        for (let i = 0; i < n; i++) { let str = ''; for (let j = 0; j < w && cps[i * w + j]; j++) str += String.fromCodePoint(cps[i * w + j]); data.push(str); }
+      } else throw new Error(`unsupported dtype ${descr}`);
+  }
+  return { shape, data };
+}
+
+/* ================================================================== PIPELINE RESULTS (Add results) */
+function setCamera(hfov, vfov, label) { S.camera = { hfov, vfov, label }; }
+function threeBadgeText() {
+  if (S.mode !== 'ours') return 'Hand-relative 3D estimates. Factory position and camera motion are not reconstructed.';
+  if (S.lift) return `EXPERIMENTAL camera space · ${S.camera.label} · depth unvalidated`;
+  if (S.synthetic || S.frames.some((f) => f.hands.some((h) => h.cam_xyz_m))) return 'Camera-space estimate (approx. lens model)';
+  return 'No camera-space 3D in this file · use "Add results" with lift_*.npz';
+}
+function updateThreeBadge() { $('threeBadge').textContent = threeBadgeText(); }
+// identity.json from `egohand identity`: one whole-track left/right vote per short-term track ("unknown" is kept).
+function applyIdentity(obj) {
+  const map = { Right: 'wearer_right', Left: 'wearer_left' };
+  let hands = 0;
+  for (const f of S.frames) for (const h of f.hands) {
+    const t = obj.tracks[String(h.track_id)];
+    if (!t || h._side_source === 'file') continue;   // schema files already carry their own anatomical side
+    h.anatomical_side = map[t.side_vote] || 'unknown'; h._side_source = 'identity.json (whole-track vote)'; hands++;
+  }
+  S.sideSource = 'identity.json';
+  return `whole-track side for ${Object.keys(obj.tracks).length} tracks (${hands} hand records)`;
+}
+// lift_<tag>.json from `egohand lift`: the assumed lens used for that lift.
+function applyLiftSummary(obj) {
+  const c = obj.camera, vfov = c.width && c.height ? c.hfov_deg * c.height / c.width : c.hfov_deg * 9 / 16;
+  setCamera(c.hfov_deg, vfov, `assumed ${String(c.model || 'lens').replace(/_/g, ' ')} HFOV ${c.hfov_deg}°`);
+  S.camera.fromSummary = true;
+  return `lens ${S.camera.label}; ${obj.lifted}/${obj.observed_hands} hands lifted by the pipeline`;
+}
+// lift_<tag>.npz from `egohand lift`: camera-space joints for observed hands, keyed by (frame_index, track_id).
+function applyLift(a, name) {
+  for (const k of ['frame_index', 'track_id', 'joints_cam_m']) if (!a[k]) throw new Error(`missing array ${k}`);
+  const n = a.frame_index.shape[0], J = a.joints_cam_m.data, ok = a.ok ? a.ok.data : null, rm = a.reproj_rmse_px ? a.reproj_rmse_px.data : null;
+  const byFrame = new Map(S.frames.map((f) => [f.frame_index, f]));
+  let merged = 0, rejected = 0, notObserved = 0, unmatched = 0;
+  for (let i = 0; i < n; i++) {
+    if (ok && !ok[i]) { rejected++; continue; }
+    const f = byFrame.get(Number(a.frame_index.data[i])), h = f && f.hands.find((x) => x.track_id === Number(a.track_id.data[i]));
+    if (!h) { unmatched++; continue; }
+    if (!HAS_3D.has(h.state)) { notObserved++; continue; }   // 3D is never attached to predicted or lost hands
+    const joints = []; for (let j = 0; j < 21; j++) { const o = (i * 21 + j) * 3; joints.push([J[o], J[o + 1], J[o + 2]]); }
+    if (!joints.every((p) => p.every(Number.isFinite))) { rejected++; continue; }
+    h.cam_xyz_m = joints; h.cam_xyz_m_raw = joints;           // lift works on raw landmarks; there is no smoothed variant
+    h.wrist_pose_cam = null;                                 // orientation is not exported by the lift
+    h.grip_aperture_m = dist3(joints[4], joints[8]);
+    h.quality = Object.assign({}, h.quality, { reprojection_error_px: rm ? rm[i] : null,
+      depth_plausible: joints[0][2] >= PLAUSIBLE_DEPTH[0] && joints[0][2] <= PLAUSIBLE_DEPTH[1] });
+    h.provenance = Object.assign({}, h.provenance, { cam_xyz_m: 'inferred', grip_aperture_m: 'inferred' });
+    h._lift = name; merged++;
+  }
+  S.lift = { name, merged };
+  const fov = /hfov(\d+(?:\.\d+)?)/i.exec(name);
+  if (!S.camera.fromSummary && fov) setCamera(+fov[1], +fov[1] * 9 / 16, `assumed equidistant fisheye HFOV ${+fov[1]}° (from file name)`);
+  return `${merged} hands in camera space` + (rejected ? `, ${rejected} rejected by the lift` : '') +
+    (notObserved ? `, ${notObserved} skipped (hand not observed)` : '') + (unmatched ? `, ${unmatched} not in the loaded frames` : '');
+}
+async function addResultFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.npz')) {
+    const arrays = await readNpz(await file.arrayBuffer());
+    if (arrays.vertices_cam_m) return applyMesh(meshFromArrays(arrays, file.name), file.name);
+    if (arrays.joints_cam_m) return applyLift(arrays, file.name);
+    throw new Error(`unrecognised arrays (${Object.keys(arrays).join(', ')})`);
+  }
+  const text = await file.text();
+  if (name.endsWith('.jsonl')) {
+    const rows = text.split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+    if (!rows.length || rows[0].type !== 'mesh_header') throw new Error('a mesh .jsonl must start with a {"type": "mesh_header"} line');
+    return applyMesh(meshFromRecords(rows[0], rows.slice(1), file.name), file.name);
+  }
+  const obj = JSON.parse(text);
+  if (obj && Array.isArray(obj.meshes)) return applyMesh(meshFromRecords(obj, obj.meshes, file.name), file.name);
+  if (obj && obj.tracks && obj.method) return applyIdentity(obj);
+  if (obj && obj.camera && /experimental/i.test(obj.status || '')) return applyLiftSummary(obj);
+  throw new Error('unrecognised JSON');
+}
+function afterResults() {
+  deriveAll(); renderChips(); renderBreakdown(); renderEvents(); updateThreeBadge(); renderMeshNote();
+  lastIdx = -1; S.dirty = true;
+}
+$('fileResults').addEventListener('change', async (ev) => {
+  const files = [...ev.target.files]; ev.target.value = '';
+  if (!files.length) return;
+  if (!S.frames.length) { toast('Load a landmarks.jsonl first.'); return; }
+  // Summaries first, so a lift_*.json can describe the lens before its .npz is merged.
+  files.sort((a, b) => (/\.json$/i.test(a.name) ? 0 : 1) - (/\.json$/i.test(b.name) ? 0 : 1));
+  const msgs = [];
+  for (const file of files) {
+    try { msgs.push(`${file.name}: ${await addResultFile(file)}`); }
+    catch (err) { msgs.push(`${file.name}: not loaded (${err.message})`); }
+  }
+  afterResults(); toast(msgs.join(' · '));
+});
+
 /* ================================================================== LOADING */
 function loadFrames(frames, { synthetic, clipId }) {
   S.frames = frames; S.synthetic = synthetic; S.clipId = clipId; S.idx = 0; S.t = 0;
-  deriveAll(); seek(0); renderChips(); renderBreakdown(); renderEvents();
+  S.camera = { ...DEFAULT_CAMERA }; S.lift = null; S.sideSource = null;
+  S.mesh = synthetic ? makeStandInMeshes(frames) : null;
+  deriveAll(); seek(0); renderChips(); renderBreakdown(); renderEvents(); updateThreeBadge(); renderMeshNote();
   $('footer').textContent = synthetic
     ? 'Prototype. With the synthetic demo data, every value on screen is made up to show the layout, and none of it is a measurement.'
     : `Loaded ${frames.length} frames from a local file. Nothing has been uploaded. Coverage counts frames with a tracked wearer hand. That is coverage, not accuracy.`;
   S.dirty = true;
+}
+// The running pipeline (egohand process) writes side "Right"/"Left" from the online tracker and no anatomical_side.
+// Map it onto the schema's wearer sides (convention verified on the dev clip: no mirroring needed) and remember the source.
+function normalizeHand(h) {
+  if (!h.anatomical_side) {
+    h.anatomical_side = h.side === 'Right' ? 'wearer_right' : h.side === 'Left' ? 'wearer_left' : 'unknown';
+    h._side_source = 'tracker (online)';
+  } else if (!h._side_source) h._side_source = 'file';
+  if (h.side_probability_right == null && typeof h.side_probability_right_smoothed === 'number') h.side_probability_right = h.side_probability_right_smoothed;
 }
 function parseJsonl(text) {
   const out = []; let bad = 0, rule = 0;
@@ -952,6 +1333,8 @@ function parseJsonl(text) {
     let r; try { r = JSON.parse(line); } catch { bad++; continue; }
     if (typeof r.frame_index !== 'number' || typeof r.timestamp_s !== 'number' || !Array.isArray(r.hands)) { bad++; continue; }
     for (const h of r.hands) if (!HAS_3D.has(h.state) && (h.cam_xyz_m || h.world_xyz_m || h.wrist_pose_cam)) { rule++; h.cam_xyz_m = h.cam_xyz_m_raw = h.world_xyz_m = h.world_xyz_m_raw = h.wrist_pose_cam = null; }
+    for (const h of r.hands) normalizeHand(h);
+    r._fileMasks = r.quality && r.quality.masks ? { ...r.quality.masks } : {};
     out.push(r);
   }
   out.sort((a, b) => a.timestamp_s - b.timestamp_s);
@@ -984,8 +1367,9 @@ $('btnBack').addEventListener('click', () => { setPlaying(false); seek(S.times[M
 $('btnFwd').addEventListener('click', () => { setPlaying(false); seek(S.times[Math.min(S.times.length - 1, S.idx + 1)] ?? 0); });
 $('selSpeed').addEventListener('change', (e) => { S.speed = +e.target.value; if (S.video) S.video.playbackRate = S.speed; });
 function bindSeg(id, fn) { const g = $(id); g.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; for (const x of g.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); fn(b.dataset.v); }); }
-bindSeg('segMode', (v) => { S.mode = v; $('threeBadge').textContent = v === 'ours' ? 'Camera-space estimate (approx. lens model)' : 'Hand-relative 3D estimates. Factory position and camera motion are not reconstructed.'; renderChips(); S.dirty = true; });
+bindSeg('segMode', (v) => { S.mode = v; updateThreeBadge(); renderChips(); S.dirty = true; });
 bindSeg('segSmooth', (v) => { S.smooth = v === 'smooth'; S.dirty = true; });
+bindSeg('segDisplay', (v) => { S.display = v; S.dirty = true; });
 bindSeg('segEvents', (v) => { S.eventFilter = v; renderEvents(); S.dirty = true; });
 for (const id of ['chkTrails', 'chkGripper']) $(id).addEventListener('change', () => (S.dirty = true));
 $('expEvents').addEventListener('click', exportEvents);

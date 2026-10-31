@@ -152,19 +152,41 @@
     return v;
   }
 
-  /** Mesh set in the viewer's format: { faces, nv, records: [{ frame_index, track_id, v }] }.
-   *  One size per track (median palm length over its frames), so a hand keeps its proportions. */
-  function forHands(hands) {
-    const scales = new Map();
-    for (const { track_id, joints } of hands) if (validJoints(joints)) {
-      if (!scales.has(track_id)) scales.set(track_id, []);
-      scales.get(track_id).push(palmScale(joints));
+  // Bone-length calibration. PARENT[i] is joint i's parent in the 21-joint hand (MediaPipe order).
+  const PARENT = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 0, 9, 10, 11, 0, 13, 14, 15, 0, 17, 18, 19];
+  const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  /** Per-track bone lengths: the median of each bone over the track's frames (robust to bad frames). */
+  function boneLengths(jointSets) {
+    const L = new Array(21).fill(0);
+    for (let i = 1; i < 21; i++) L[i] = median(jointSets.map((j) => len(sub(j[i], j[PARENT[i]]))));
+    return L;
+  }
+  /** Joints with calibrated lengths: each bone keeps this frame's DIRECTION, gets the track's median LENGTH. */
+  function calibrate(joints, L) {
+    const out = new Array(21); out[0] = joints[0].slice(0, 3);
+    for (let i = 1; i < 21; i++) {
+      const p = PARENT[i], dir = unit(sub(joints[i], joints[p]), [0, 0, 1]);
+      out[i] = add(out[p], mul(dir, L[i]));
     }
-    const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
-    const trackScale = new Map([...scales].map(([k, a]) => [k, median(a)]));
+    return out;
+  }
+
+  /** Mesh set in the viewer's format: { faces, nv, records: [{ frame_index, track_id, v }] }.
+   *  Per track: one size (median palm length) and calibrated bone lengths (median per bone), so a
+   *  hand keeps its proportions and finger lengths from frame to frame. The skeleton overlay still
+   *  shows the estimated joints; only this visual surface is calibrated. */
+  function forHands(hands) {
+    const byTrack = new Map();
+    for (const h of hands) if (validJoints(h.joints)) {
+      if (!byTrack.has(h.track_id)) byTrack.set(h.track_id, []);
+      byTrack.get(h.track_id).push(h.joints);
+    }
+    const lengths = new Map([...byTrack].map(([k, sets]) => [k, boneLengths(sets)]));
+    const scales = new Map([...byTrack].map(([k, sets]) => [k, median(sets.map(palmScale))]));
     const records = [];
     for (const { frame_index, track_id, joints } of hands) {
-      const v = build(joints, trackScale.get(track_id));
+      if (!validJoints(joints)) continue;
+      const v = build(calibrate(joints, lengths.get(track_id)), scales.get(track_id));
       if (v) records.push({ frame_index, track_id, ok: true, v, gap_m: null });
     }
     return { backend: 'joint-skinned', faces: FACES, nv: VERTEX_COUNT, records };
@@ -175,7 +197,7 @@
     return PARTS.map(([, , partFaces]) => signedVolume(v, partFaces));
   }
 
-  const api = { build, forHands, partVolumes, FACES, VERTEX_COUNT, BONES };
+  const api = { build, forHands, partVolumes, calibrate, boneLengths, FACES, VERTEX_COUNT, BONES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.EgoHandMesh = api;
 })(typeof window !== 'undefined' ? window : globalThis);

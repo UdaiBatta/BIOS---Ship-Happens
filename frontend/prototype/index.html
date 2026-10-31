@@ -64,7 +64,7 @@
   }
   .btn:hover { background: var(--surface-3); }
   .btn:focus-visible, .seg button:focus-visible, .ev:focus-visible { outline: 2px solid var(--right); outline-offset: 1px; }
-  .btn[disabled] { color: var(--muted); cursor: not-allowed; background: transparent; }
+  .btn[disabled], .btn.disabled { color: var(--muted); cursor: not-allowed; background: transparent; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
   .seg button {
     height: 28px; padding: 0 10px; border: 0; background: var(--surface-2); color: var(--ink-2); cursor: pointer;
@@ -164,6 +164,7 @@
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #0b0b0b; color: var(--ink);
     border: 1px solid var(--warning); border-radius: 8px; padding: 8px 12px; display: none; z-index: 20; max-width: 80vw;
   }
+  [hidden] { display: none !important; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
 </head>
@@ -195,7 +196,7 @@
   <span class="sep"></span>
   <label class="btn" title="Load a landmarks.jsonl file from this laptop">Load JSONL<input type="file" id="fileJsonl" accept=".jsonl,.json,.txt"></label>
   <label class="btn" title="Play a local video in sync. Stays on this laptop.">Load video<input type="file" id="fileVideo" accept="video/*"></label>
-  <label class="btn" title="Add pipeline results for the loaded clip (several files at once): lift_*.npz + lift_*.json (camera-space 3D), identity.json (left/right per track), mesh_*.npz / .json / .jsonl (WiLoR or HaMeR meshes). Read locally, never uploaded.">Add results<input type="file" id="fileResults" accept=".npz,.json,.jsonl" multiple></label>
+  <label class="btn" id="lblResults" title="Add pipeline results for the loaded clip (several files at once): lift_*.npz + lift_*.json (camera-space 3D), identity.json (left/right per track), mesh_*.npz / .json / .jsonl (WiLoR or HaMeR meshes). Read locally, never uploaded.">Add results<input type="file" id="fileResults" accept=".npz,.json,.jsonl" multiple></label>
   <button class="btn" id="btnDemo" title="Back to the synthetic demo data">Synthetic demo</button>
 </div>
 
@@ -217,15 +218,14 @@
       <span class="hint" id="threeHint"></span>
     </div>
     <div class="legend" style="margin-top: 8px; align-items: center">
-      <div class="seg" id="segDisplay" role="group" aria-label="Hand display in 3D">
+      <div class="seg" id="segDisplay" role="group" aria-label="Hand display in 3D" hidden>
         <button data-v="skeleton" aria-pressed="false">Skeleton</button>
         <button data-v="mesh" aria-pressed="false">Mesh</button>
         <button data-v="both" aria-pressed="true">Mesh + skeleton</button>
       </div>
       <label><input type="checkbox" id="chkTrails" checked> wrist trails (2 s)</label>
-      <label><input type="checkbox" id="chkGripper" checked> robot gripper (follows wrist, opens with grip aperture)</label>
     </div>
-    <div class="legend note" id="meshNote"></div>
+    <div class="legend note" id="meshNote" hidden></div>
   </section>
 
   <section class="panel" id="p-lanes" aria-label="Reliability timeline">
@@ -241,7 +241,6 @@
       <span><i class="key-line" style="background: var(--left)"></i>wearer left</span>
       <span><i class="key-line" style="background: var(--right)"></i>wearer right</span>
       <span><i class="key-rect" style="background: rgba(240,239,236,0.07); outline: 1px solid var(--axis)"></i>plausible range</span>
-      <span><i class="key-line" style="background: var(--muted)"></i>threshold</span>
     </div>
     <canvas class="chart" id="cvSignals"></canvas>
   </section>
@@ -266,7 +265,6 @@
       <button class="btn" id="expJsonl">Frames JSONL <small>schema v1</small></button>
       <button class="btn" id="expEvents">Events CSV <small>clip_id, start_s, end_s, type, severity</small></button>
       <button class="btn" id="expAria">Aria-compatible CSV <small>camera-space hands</small></button>
-      <button class="btn" disabled title="Written by the pipeline (export_robot.py)">LeRobot episodes <small>pipeline</small></button>
       <button class="btn" disabled title="Written by the pipeline (render.py)">Rerun .rrd + blueprint <small>pipeline</small></button>
     </div>
   </section>
@@ -295,7 +293,6 @@ const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,
   [9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
 const HAS_3D = new Set(['observed', 'reacquired']);
 const PLAUSIBLE_DEPTH = [0.2, 0.9];  // metres, from the plan's plausibility check
-const REPROJ_THRESHOLD_PX = 8;       // prototype value for the "3D valid" mask
 const TRAIL_S = 2.0;
 const DEFAULT_CAMERA = { hfov: 128, vfov: 67, label: 'assumed 128° × 67° FOV' };
 const MIN_MESH_GAP_S = 0.2;          // shorter mesh gaps stay visible in the Mesh lane but are not listed as events
@@ -307,7 +304,7 @@ const S = {
   mode: 'ours', smooth: true, synthetic: true, clipId: 'synthetic_demo',
   lanes: null, series: null, events: [], eventFilter: 'all', breakdown: null,
   orbit: { yaw: -0.12, pitch: 0.62, dist: 0.9 }, video: null, dirty: true,
-  camera: { ...DEFAULT_CAMERA }, lift: null, sideSource: null,
+  camera: { ...DEFAULT_CAMERA }, lift: null, liftSummaries: new Map(), sideSource: null,
   mesh: null, display: 'both', meshCoverage: null,
 };
 
@@ -407,8 +404,6 @@ function makeSynthetic() {
         const centre = mul([0, 5, 9, 13, 17].reduce((a, j) => add(a, cam[j]), [0, 0, 0]), 1 / 5);
         const world = cam.map((p) => sub(p, centre));
         const worldRaw = world.map((p) => [p[0] + gauss() * 0.002, p[1] + gauss() * 0.002, p[2] + gauss() * 0.003]);
-        const Xh = norm(sub(cam[5], cam[17])), Fh = norm(sub(cam[9], cam[0]));
-        const n = norm(cross(Fh, Xh)), palm = side === 'wearer_left' ? mul(n, -1) : n;
         const reproj = Math.abs(2.2 + gauss() * 0.7) + (blurry ? 5 + rnd() * 6 : 0);
         last2D[side] = imgS;
         const org = (inRange(t, ORIGIN[side]) || [0, 0, 'full_frame'])[2];
@@ -419,8 +414,8 @@ function makeSynthetic() {
           detection_origin: org, confidence: null,
           image_xyz_raw: imgRaw, image_xyz: imgS, world_xyz_m_raw: worldRaw, world_xyz_m: world,
           cam_xyz_m: cam, cam_xyz_m_raw: camRaw,
-          wrist_pose_cam: { t_m: cam[0], q_xyzw: [0, 0, 0, 1] },
-          palm_normal_cam: palm, grip_aperture_m: dist3(cam[4], cam[8]),
+          wrist_pose_cam: null, palm_normal_cam: null,   // orientation is not estimated; left blank instead of a placeholder
+          grip_aperture_m: dist3(cam[4], cam[8]),
           quality: { reprojection_error_px: reproj, bone_length_cv: 0.03 + rnd() * 0.02, depth_plausible: cam[0][2] >= PLAUSIBLE_DEPTH[0] && cam[0][2] <= PLAUSIBLE_DEPTH[1] },
           provenance: { timestamp_s: 'measured', image_xyz_raw: 'predicted', world_xyz_m_raw: 'predicted', cam_xyz_m: 'inferred', grip_aperture_m: 'inferred', anatomical_side: 'inferred' },
         });
@@ -439,48 +434,12 @@ function makeSynthetic() {
   return frames;
 }
 
-/* ================================================================== MESHES (WiLoR / HaMeR, or a synthetic stand-in)
+/* ================================================================== MESHES (WiLoR / HaMeR, loaded from a mesh file only)
    S.mesh = { backend, label, licence, synthetic, faces: Uint32Array, nv, byKey: Map("frame:track" -> { v: Float32Array(nv*3), gap_m }) }
    Vertices are camera-frame metres (x right, y down, z forward), already placed by the pipeline (mesh-place).
    Meshes exist only for observed / reacquired hands; every other hand falls back to its skeleton. */
 const meshKey = (frameIndex, trackId) => `${frameIndex}:${trackId}`;
 function meshFor(frame, hand) { return S.mesh && frame && hand ? S.mesh.byKey.get(meshKey(frame.frame_index, hand.track_id)) || null : null; }
-// Stand-in geometry: tapered tubes around the 21-point skeleton plus a palm. It lets the mesh view be demonstrated
-// without licensed MANO assets. It is NOT a MANO, WiLoR or HaMeR output.
-const TUBE_K = 6;
-const JOINT_R = [0.014, 0.013, 0.011, 0.0095, 0.008, 0.0105, 0.0095, 0.0085, 0.0075, 0.0105, 0.0095, 0.0085, 0.0075,
-  0.0100, 0.0090, 0.0080, 0.0072, 0.0090, 0.0080, 0.0072, 0.0065];
-const STANDIN = (() => {
-  const faces = [], ring = 2 * TUBE_K;
-  BONES.forEach((_, b) => { const o = b * ring; for (let k = 0; k < TUBE_K; k++) { const k2 = (k + 1) % TUBE_K; faces.push(o + k, o + k2, o + TUBE_K + k, o + k2, o + TUBE_K + k2, o + TUBE_K + k); } });
-  const pj = BONES.length * ring;   // palm triangles use the 21 joints, appended after the tube rings
-  for (const [a, b, c] of [[0, 1, 5], [0, 5, 9], [0, 9, 13], [0, 13, 17]]) faces.push(pj + a, pj + b, pj + c);
-  return { faces: Uint32Array.from(faces), nv: pj + 21 };
-})();
-function standInVertices(J) {
-  const v = new Float32Array(STANDIN.nv * 3); let o = 0;
-  for (const [a, b] of BONES) {
-    const d = norm(sub(J[b], J[a])), u = norm(cross(d, Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0])), w = cross(d, u);
-    for (const j of [a, b]) for (let k = 0; k < TUBE_K; k++) {
-      const t = (2 * Math.PI * k) / TUBE_K, c = Math.cos(t) * JOINT_R[j], sn = Math.sin(t) * JOINT_R[j];
-      for (let x = 0; x < 3; x++) v[o++] = J[j][x] + u[x] * c + w[x] * sn;
-    }
-  }
-  for (const p of J) { v[o++] = p[0]; v[o++] = p[1]; v[o++] = p[2]; }
-  return v;
-}
-function makeStandInMeshes(frames) {
-  const rnd = mulberry32(11), byKey = new Map();
-  for (const f of frames) for (const h of f.hands) {
-    if (!HAS_3D.has(h.state) || !h.cam_xyz_m || h.anatomical_side === 'other') continue;
-    const blurry = f.quality && f.quality.blur_laplacian_var != null && f.quality.blur_laplacian_var < 80;
-    if (blurry || (h.anatomical_side === 'wearer_left' && f.timestamp_s >= 9 && f.timestamp_s < 10.5)) continue; // simulated mesh failures
-    byKey.set(meshKey(f.frame_index, h.track_id), { v: standInVertices(h.cam_xyz_m), gap_m: Math.abs(0.012 + (rnd() - 0.5) * 0.016), sign: 0 });
-    h.mesh_ref = meshKey(f.frame_index, h.track_id);
-  }
-  return { backend: 'stand-in', label: 'Synthetic stand-in mesh (tubes around the skeleton) · not MANO, not WiLoR or HaMeR', licence: null,
-    synthetic: true, faces: STANDIN.faces, nv: STANDIN.nv, byKey };
-}
 const MESH_LICENCE = (backend) => /wilor/i.test(backend) ? 'WiLoR: CC BY-NC-ND 4.0 + MANO licence · non-commercial use only'
   : /hamer/i.test(backend) ? 'HaMeR code: MIT + MANO licence · non-commercial use only' : 'Check the model and MANO licences before sharing';
 // Mesh files written by the pipeline. NPZ arrays: frame_index (n), track_id (n), vertices_cam_m (n,V,3), faces (F,3);
@@ -536,13 +495,15 @@ function applyMesh(m, name) {
     byKey.set(meshKey(r.frame_index, r.track_id), { v: r.v, gap_m: r.gap_m, sign: windingSign(r.v, m.faces) });
     h.mesh_ref = meshKey(r.frame_index, r.track_id);
   }
+  if (!byKey.size) throw new Error('no mesh rows match an observed hand of the loaded run');
   S.mesh = { backend: m.backend, label: `${m.backend} meshes from ${name} (camera frame, placed by the pipeline)`, licence: MESH_LICENCE(m.backend),
-    synthetic: false, faces: m.faces, nv: m.nv, byKey };
+    faces: m.faces, nv: m.nv, byKey };
   return `${byKey.size} ${m.backend} meshes` + (failed ? `, ${failed} marked failed` : '') + (notObserved ? `, ${notObserved} skipped (hand not observed)` : '') +
     (unmatched ? `, ${unmatched} not in the loaded frames` : '') + (bad ? `, ${bad} with bad vertices` : '');
 }
 function renderMeshNote() {
   const n = $('meshNote');
+  n.hidden = $('segDisplay').hidden = !S.mesh;   // no mesh UI unless a mesh file has been loaded
   const gaps = S.mesh && S.shortMeshGaps ? ` ${S.shortMeshGaps} gaps shorter than ${MIN_MESH_GAP_S} s are shown in the Mesh lane only.` : '';
   n.textContent = S.mesh ? `Meshes: ${S.mesh.label}${S.mesh.licence ? ' · ' + S.mesh.licence : ''}. Shown in camera-space view only; hands without a mesh keep their skeleton.${gaps}`
     : 'No meshes loaded. Add mesh_*.npz from the WiLoR / HaMeR step with "Add results". Hands keep their skeleton.';
@@ -563,8 +524,11 @@ function deriveAll() {
   const dts = []; for (let i = 1; i < Math.min(F.length, 300); i++) dts.push(S.times[i] - S.times[i - 1]);
   dts.sort((a, b) => a - b);
   S.fps = dts.length ? 1 / dts[Math.floor(dts.length / 2)] : 30;
-  S.duration = F.length ? S.times[F.length - 1] + 1 / S.fps : 0;
+  S.tStart = F.length ? S.times[0] : 0;                         // interval runs (e.g. --start-seconds 60) do not start at 0
+  S.tEnd = F.length ? S.times[F.length - 1] + 1 / S.fps : 0;
+  S.duration = S.tEnd - S.tStart;
   const hasOther = F.some((f) => (f.hands || []).some((h) => h.anatomical_side === 'other'));
+  const hasCam = F.some((f) => f.hands.some((h) => h.cam_xyz_m));
 
   // Frame masks: use the file's masks when present, otherwise compute them the same way the pipeline should.
   for (const f of F) {
@@ -572,7 +536,9 @@ function deriveAll() {
     const m = f.quality.masks = Object.assign({}, f._fileMasks || {});
     if (m.hand_observed === undefined) m.hand_observed = (f.hands || []).some((h) => HAS_3D.has(h.state));
     if (m.low_blur === undefined) m.low_blur = f.quality.blur_laplacian_var == null ? null : f.quality.blur_laplacian_var >= 80;
-    if (m.cam_space_valid === undefined) m.cam_space_valid = (f.hands || []).some((h) => h.cam_xyz_m && h.quality && h.quality.reprojection_error_px != null && h.quality.reprojection_error_px < REPROJ_THRESHOLD_PX);
+    // 3D valid = at least one observed hand has camera-space joints accepted by the pipeline's lift (its own
+    // reprojection limit, --max-reproj-px, is applied there and is not recorded in the outputs; nothing is assumed here).
+    if (m.cam_space_valid === undefined && hasCam) m.cam_space_valid = (f.hands || []).some((h) => HAS_3D.has(h.state) && h.cam_xyz_m);
     for (const k of Object.keys(m)) if (typeof m[k] !== 'boolean') delete m[k];   // unknown = absent (schema masks are booleans)
   }
 
@@ -582,8 +548,8 @@ function deriveAll() {
     { key: 'wearer_right', label: 'Right hand', kind: 'hand', side: 'wearer_right', values: F.map((f) => laneState(handFor(f, 'wearer_right'))) },
   ];
   if (hasOther) lanes.push({ key: 'other', label: 'Other people', kind: 'hand', side: 'other', values: F.map((f) => laneState(handFor(f, 'other'))) });
-  lanes.push({ key: 'low_blur', label: 'Low blur', kind: 'mask', values: F.map((f) => f.quality.masks.low_blur) });
-  lanes.push({ key: 'cam_space_valid', label: '3D valid', kind: 'mask', values: F.map((f) => f.quality.masks.cam_space_valid) });
+  for (const [key, label] of [['low_blur', 'Low blur'], ['cam_space_valid', '3D valid']])   // shown only when the run has the data
+    if (F.some((f) => typeof f.quality.masks[key] === 'boolean')) lanes.push({ key, label, kind: 'mask', values: F.map((f) => f.quality.masks[key]) });
   let meshObserved = 0, meshShown = 0;
   if (S.mesh) lanes.push({ key: 'mesh', label: 'Mesh', kind: 'mesh', values: F.map((f) => {
     const obs = f.hands.filter((h) => HAS_3D.has(h.state) && h.anatomical_side !== 'other');
@@ -613,6 +579,15 @@ function deriveAll() {
     return { side: l.side, label: l.label, tracked: c.tracked / n, predicted: c.predicted / n, missing: c.missing / n };
   });
 
+  const allHands = F.flatMap((f) => f.hands);
+  const any = (fn) => allHands.some((h) => { const v = fn(h); return v !== null && v !== undefined; });
+  S.avail = {
+    blur: F.some((f) => f.quality.blur_laplacian_var != null),
+    wristDepth: any(wristDepth), aperture: any((h) => h.grip_aperture_m), reproj: any((h) => h.quality && h.quality.reprojection_error_px),
+    boneCv: any((h) => h.quality && h.quality.bone_length_cv), depthPlausible: any((h) => h.quality && h.quality.depth_plausible),
+    pRight: any((h) => h.side_probability_right), confidence: any((h) => h.confidence), camSource: any((h) => h.provenance && h.provenance.cam_xyz_m),
+    mesh: !!S.mesh, meshGap: !!S.mesh && [...S.mesh.byKey.values()].some((m) => m.gap_m != null),
+  };
   S.events = deriveEvents(F, lanes);
   S.coverage = F.length ? F.filter((f) => WEARER.some((s) => HAS_3D.has(laneState(handFor(f, s))))).length / F.length : null;
 }
@@ -624,7 +599,7 @@ function toRuns(values) {
 }
 
 function deriveEvents(F, lanes) {
-  const ev = [], T = (i) => S.times[Math.min(i, S.times.length - 1)], end = (i) => (i < S.times.length ? S.times[i] : S.duration);
+  const ev = [], T = (i) => S.times[Math.min(i, S.times.length - 1)], end = (i) => (i < S.times.length ? S.times[i] : S.tEnd);
   for (const L of lanes) {
     if (L.kind === 'hand') {
       const who = L.side === 'other' ? "Other person's hand" : (L.side === 'wearer_left' ? 'Left hand' : 'Right hand');
@@ -647,7 +622,7 @@ function deriveEvents(F, lanes) {
           label: r.v === 'none' ? 'No mesh for the observed hands (skeleton shown)' : 'Mesh missing for one observed hand (skeleton shown)', i0: r.i0, i1: r.i1 });
       }
     } else {
-      for (const r of L.runs) if (r.v === false) ev.push({ type: L.key === 'low_blur' ? 'low_quality_blur' : 'cam_space_invalid', severity: 'warn', label: L.key === 'low_blur' ? 'Low quality (blur)' : '3D not valid (reprojection error ≥ threshold or no hand)', i0: r.i0, i1: r.i1 });
+      for (const r of L.runs) if (r.v === false) ev.push({ type: L.key === 'low_blur' ? 'low_quality_blur' : 'cam_space_invalid', severity: 'warn', label: L.key === 'low_blur' ? 'Low quality (blur)' : '3D not valid (no observed hand with accepted camera-space 3D)', i0: r.i0, i1: r.i1 });
     }
   }
   // Implausible depth runs per hand
@@ -670,15 +645,26 @@ function indexAt(t) {
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (a[m] <= t + 1e-6) lo = m; else hi = m - 1; }
   return lo;
 }
+// Middle of frame i's display interval. Seeking a video there shows exactly that frame (no rounding at frame boundaries).
+function frameMid(i) { const next = i + 1 < S.times.length ? S.times[i + 1] : S.times[i] + 1 / S.fps; return (S.times[i] + next) / 2; }
+function inData(t) { return S.frames.length > 0 && t >= S.tStart - 1e-6 && t <= S.tEnd + 1e-3; }
 function seek(t) {
-  S.t = clamp(t, 0, Math.max(0, S.duration - 1e-3));
+  S.t = clamp(t, S.tStart, Math.max(S.tStart, S.tEnd - 1e-3));
   S.idx = indexAt(S.t);
-  if (S.video && Math.abs(S.video.currentTime - S.t) > 0.02) S.video.currentTime = S.t;
+  if (S.video) { S.t = frameMid(S.idx); if (Math.abs(S.video.currentTime - S.t) > 1e-4) S.video.currentTime = S.t; }
   S.dirty = true;
 }
+function stepFrame(d) {
+  setPlaying(false);
+  if (!S.times.length) return;
+  const cur = inData(S.t) ? S.idx : (S.t < S.tStart ? -1 : S.times.length);
+  seek(frameMid(clamp(cur + d, 0, S.times.length - 1)));
+}
+// Paused with a video: show the frame (and skeleton) the video actually displays.
+function snapToVideo() { if (S.video && !S.playing) { S.t = S.video.currentTime; S.idx = indexAt(S.t); S.dirty = true; } }
 function setPlaying(p) {
   S.playing = p; $('btnPlay').textContent = p ? '❚❚ Pause' : '▶ Play';
-  if (S.video) { if (p) S.video.play().catch(() => {}); else S.video.pause(); }
+  if (S.video) { if (p) S.video.play().catch(() => {}); else { S.video.pause(); snapToVideo(); } }
   S.lastTick = performance.now();
 }
 
@@ -705,7 +691,7 @@ function drawVideo() {
     g.fillText('[ head-camera frame — never in public material ]', w / 2, h * 0.16);
     g.textAlign = 'left';
   }
-  if (!f) return;
+  if (!f || !inData(S.t)) return;
   const placed = [];
   for (const hnd of f.hands || []) {
     const pts = S.smooth ? (hnd.image_xyz || hnd.image_xyz_raw) : (hnd.image_xyz_raw || (hnd.state === 'predicted' ? hnd.image_xyz : null));
@@ -777,16 +763,19 @@ function drawThree() {
     // Plausible depth band edges
     for (const z of PLAUSIBLE_DEPTH) { seg([-0.6, GY, z], [0.6, GY, z], COLOR.axis, 1.5); const L = P([0.6, GY, z]); g.fillStyle = COLOR.muted; g.font = '11px ' + C('--font'); g.fillText(`${z} m`, L[0] + 4, L[1] + 4); }
     // Camera frustum from the current (assumed) lens model, drawn to 0.12 m; half-angles clipped at 75° so wide lenses stay drawable
-    const half = (deg) => Math.tan(Math.min(deg / 2, 75) * Math.PI / 180);
-    const zf = 0.12, xf = half(S.camera.hfov) * zf, yf = half(S.camera.vfov) * zf;
-    const corners = [[-xf, -yf, zf], [xf, -yf, zf], [xf, yf, zf], [-xf, yf, zf]];
-    for (const c of corners) seg([0, 0, 0], c, COLOR.muted, 1, 0.8);
-    for (let i = 0; i < 4; i++) seg(corners[i], corners[(i + 1) % 4], COLOR.muted, 1, 0.8);
+    if (S.camera && S.camera.vfov) {   // drawn only when the lens is known (synthetic demo or lift_*.json)
+      const half = (deg) => Math.tan(Math.min(deg / 2, 75) * Math.PI / 180);
+      const zf = 0.12, xf = half(S.camera.hfov) * zf, yf = half(S.camera.vfov) * zf;
+      const corners = [[-xf, -yf, zf], [xf, -yf, zf], [xf, yf, zf], [-xf, yf, zf]];
+      for (const c of corners) seg([0, 0, 0], c, COLOR.muted, 1, 0.8);
+      for (let i = 0; i < 4; i++) seg(corners[i], corners[(i + 1) % 4], COLOR.muted, 1, 0.8);
+    }
     const O = P([0, 0, 0]); g.beginPath(); g.moveTo(O[0], O[1] - 7); g.lineTo(O[0] - 7, O[1] + 6); g.lineTo(O[0] + 7, O[1] + 6); g.closePath(); g.fillStyle = COLOR.ink2; g.fill();
     g.fillStyle = COLOR.ink2; g.font = '11px ' + C('--font'); g.fillText('head camera', O[0] + 10, O[1] + 4);
     placed.push({ x: O[0] + 6, y: O[1] - 8, w: g.measureText('head camera').width + 8, h: 16 });
   }
-  const f = S.frames[S.idx]; if (!f) return;
+  const f = S.frames[S.idx];
+  if (!f || !inData(S.t)) { $('threeHint').textContent = S.frames.length ? 'Outside the loaded run’s time range: no hand data' : ''; return; }
   const missing = [];
   const BASE_ANCHOR = { wearer_left: [-0.13, 0.16, 0.42], wearer_right: [0.13, 0.16, 0.42], other: [0.36, 0.16, 0.42], unknown: [0, 0.16, 0.42] };
   const drawList = [], overlay = [], eye = viewEye();
@@ -809,10 +798,9 @@ function drawThree() {
       for (const [a, b] of BONES) { const A = P(pts[a]), B = P(pts[b]); drawList.push({ d: (A[2] + B[2]) / 2, kind: 'bone', A, B, col }); }
       for (let j = 0; j < 21; j++) { const A = P(pts[j]); drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
     } else if (S.display === 'both') overlay.push(pts.map(P));
-    const meshTag = ours && S.mesh && S.display !== 'skeleton' && side !== 'other' ? (mesh ? ` · ${S.mesh.synthetic ? 'stand-in mesh' : S.mesh.backend + ' mesh'}` : ' · no mesh (skeleton)') : '';
-    const depthTag = ours ? (hnd.wrist_pose_cam ? ` · ${num(hnd.wrist_pose_cam.t_m[2], 2)} m` : (S.lift && hnd.cam_xyz_m ? ` · ${num(hnd.cam_xyz_m[0][2], 2)} m` : '')) : '';
+    const meshTag = ours && S.mesh && S.display !== 'skeleton' && side !== 'other' ? (mesh ? ` · ${S.mesh.backend} mesh` : ' · no mesh (skeleton)') : '';
+    const depthTag = ours && hnd.cam_xyz_m ? ` · ${num(wristDepth(hnd), 2)} m` : '';
     drawList.push({ d: 0, kind: 'label', A: P(pts[0]), col, text: `${SIDE_LABEL[side] || side}${depthTag}${meshTag}` });
-    if (ours && $('chkGripper').checked && side !== 'other' && hnd.grip_aperture_m != null) drawGripper(g, P, pts, hnd.grip_aperture_m);
   }
   if (ours && $('chkTrails').checked) {
     for (const side of WEARER) {
@@ -872,16 +860,6 @@ function pushMesh(list, mesh, faces, col, P, eye) {
     list.push({ kind: 'tri', d: (scr[ia][2] + scr[ib][2] + scr[ic][2]) / 3, pts: [scr[ia], scr[ib], scr[ic]], fill: `rgb(${(r * k) | 0},${(gg * k) | 0},${(b * k) | 0})` });
   }
 }
-function drawGripper(g, P, pts, aperture) {
-  // A simple two-finger gripper mounted above the wrist, aligned with the hand.
-  const Xh = norm(sub(pts[5], pts[17])), Fh = norm(sub(pts[9], pts[0])), Up = norm(cross(Xh, Fh));
-  const base = add(pts[0], add(mul(Up, -0.07), mul(Fh, 0.02))), half = clamp(aperture, 0, 0.12) / 2 + 0.008;
-  const l = add(base, mul(Xh, -half)), r = add(base, mul(Xh, half));
-  const lt = add(l, mul(Fh, 0.045)), rt = add(r, mul(Fh, 0.045)), back = add(base, mul(Fh, -0.03));
-  const line = (a, b) => { const A = P(a), B = P(b); g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke(); };
-  g.save(); g.strokeStyle = COLOR.ink2; g.lineWidth = 3; g.lineCap = 'round';
-  line(back, base); line(l, r); line(l, lt); line(r, rt); g.restore();
-}
 
 /* ================================================================== PANEL 3: LANES */
 const LANE = { labelW: 104, rowH: 16, gap: 8, top: 4, axisH: 22 };
@@ -895,8 +873,8 @@ function laneFill(L, v) {
   return null; // lost / none / retired: empty
 }
 function lanesGeom() { const n = S.lanes.length; return { h: LANE.top + n * (LANE.rowH + LANE.gap) + LANE.axisH }; }
-function xOfT(t, w) { return LANE.labelW + (t / (S.duration || 1)) * (w - LANE.labelW - 8); }
-function tOfX(x, w) { return clamp(((x - LANE.labelW) / (w - LANE.labelW - 8)) * S.duration, 0, S.duration); }
+function xOfT(t, w) { return LANE.labelW + ((t - S.tStart) / (S.duration || 1)) * (w - LANE.labelW - 8); }
+function tOfX(x, w) { return clamp(S.tStart + ((x - LANE.labelW) / (w - LANE.labelW - 8)) * S.duration, S.tStart, S.tEnd); }
 function drawLanes() {
   const cv = $('cvLanes'), { g, w, h } = fit(cv, lanesGeom().h);
   g.clearRect(0, 0, w, h); g.font = '12px ' + C('--font');
@@ -906,7 +884,7 @@ function drawLanes() {
     g.fillStyle = '#121211'; g.fillRect(LANE.labelW, y, w - LANE.labelW - 8, LANE.rowH);
     for (const r of L.runs) {
       const fl = laneFill(L, r.v); if (!fl) continue;
-      const x0 = xOfT(S.times[r.i0], w), x1 = xOfT(r.i1 < S.times.length ? S.times[r.i1] : S.duration, w);
+      const x0 = xOfT(S.times[r.i0], w), x1 = xOfT(r.i1 < S.times.length ? S.times[r.i1] : S.tEnd, w);
       g.globalAlpha = fl.a; g.fillStyle = fl.c; g.fillRect(x0 + 1, y, Math.max(1.5, x1 - x0 - 2), LANE.rowH); g.globalAlpha = 1;
     }
   });
@@ -914,7 +892,7 @@ function drawLanes() {
   const yA = LANE.top + S.lanes.length * (LANE.rowH + LANE.gap) - LANE.gap + 4;
   g.strokeStyle = COLOR.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(LANE.labelW, yA); g.lineTo(w - 8, yA); g.stroke();
   drawTimeTicks(g, w, yA);
-  drawPlayhead(g, xOfT(S.t, w), 0, yA, fmtT(S.t));
+  if (S.t >= S.tStart && S.t <= S.tEnd) drawPlayhead(g, xOfT(S.t, w), 0, yA, fmtT(S.t));
 }
 function drawPlayhead(g, x, y0, y1, label) {
   g.strokeStyle = COLOR.ink; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke();
@@ -923,7 +901,7 @@ function drawPlayhead(g, x, y0, y1, label) {
 function drawTimeTicks(g, w, yA) {
   g.fillStyle = COLOR.muted; g.font = '11px ' + C('--font'); g.textBaseline = 'top';
   const step = niceStep(S.duration / 8);
-  for (let t = 0; t <= S.duration + 1e-6; t += step) {
+  for (let t = Math.ceil(S.tStart / step - 1e-9) * step; t <= S.tEnd + 1e-6; t += step) {
     const x = xOfT(t, w), lab = fmtS(t), tw = g.measureText(lab).width;
     g.fillRect(x, yA, 1, 4); g.fillText(lab, clamp(x - tw / 2, LANE.labelW - 4, w - tw - 2), yA + 6);
   }
@@ -932,18 +910,17 @@ function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw || 1))
 
 /* ================================================================== PANEL 4: SIGNALS (small multiples, one axis each) */
 const SIG = [
-  { key: 'reproj', label: 'Reprojection error (px)', fmt: (v) => num(v, 1) + ' px', threshold: REPROJ_THRESHOLD_PX },
+  { key: 'reproj', label: 'Reprojection error (px)', fmt: (v) => num(v, 1) + ' px' },
   { key: 'aperture', label: 'Grip aperture (m)', fmt: (v) => num(v, 3) + ' m' },
   { key: 'depth', label: 'Wrist depth (m)', fmt: (v) => num(v, 2) + ' m', band: PLAUSIBLE_DEPTH },
 ];
 const MESH_SIG = { key: 'meshGap', label: 'Mesh vs PnP depth gap (cm)', fmt: (v) => num(v, 1) + ' cm' };
-function sigDefs() { return S.mesh && WEARER.some((sd) => S.series[sd].meshGap.some((v) => v != null)) ? [...SIG, MESH_SIG] : SIG; }
+function sigDefs() { return [...SIG, MESH_SIG].filter((d) => WEARER.some((sd) => S.series[sd][d.key].some((v) => v != null))); }
 const SG = { rowH: 70, gap: 34, top: 22, axisH: 22 };
 function sigRange(key) {
   let lo = Infinity, hi = -Infinity;
   for (const side of WEARER) for (const v of S.series[side][key]) if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
   const d = sigDefs().find((s) => s.key === key);
-  if (d.threshold != null) hi = Math.max(hi, d.threshold * 1.15);
   if (d.band) { lo = Math.min(lo, d.band[0]); hi = Math.max(hi, d.band[1]); }
   if (!isFinite(lo)) { lo = 0; hi = 1; }
   if (key !== 'depth') lo = 0;
@@ -951,9 +928,10 @@ function sigRange(key) {
   return [lo, hi + (hi - lo) * 0.05];
 }
 function drawSignals() {
-  const defs = sigDefs(), cv = $('cvSignals'), H = SG.top + defs.length * (SG.rowH + SG.gap) + SG.axisH;
+  const defs = sigDefs(), cv = $('cvSignals'), H = defs.length ? SG.top + defs.length * (SG.rowH + SG.gap) + SG.axisH : 40;
   const { g, w, h } = fit(cv, H);
   g.clearRect(0, 0, w, h);
+  if (!defs.length) { g.fillStyle = COLOR.muted; g.font = '12px ' + C('--font'); g.textBaseline = 'middle'; g.fillText('No camera-space signals in this run. Add lift_*.npz and lift_*.json with "Add results".', 0, 20); return; }
   defs.forEach((d, k) => {
     const y0 = SG.top + k * (SG.rowH + SG.gap), [lo, hi] = sigRange(d.key), Y = (v) => y0 + SG.rowH - ((v - lo) / (hi - lo)) * SG.rowH;
     g.font = '11px ' + C('--font'); g.fillStyle = COLOR.ink2; g.textBaseline = 'bottom'; g.fillText(d.label, LANE.labelW, y0 - 8);
@@ -961,7 +939,6 @@ function drawSignals() {
     g.textBaseline = 'middle'; g.fillStyle = COLOR.muted;
     for (const v of [lo, (lo + hi) / 2, hi]) { const y = Y(v); g.fillStyle = COLOR.grid; g.fillRect(LANE.labelW, y, w - LANE.labelW - 8, 1); g.fillStyle = COLOR.muted; g.textAlign = 'right'; g.fillText(num(v, d.key === 'reproj' ? 0 : 2), LANE.labelW - 8, y); g.textAlign = 'left'; }
     if (d.band) { const ya = Y(d.band[1]), yb = Y(d.band[0]); g.fillStyle = 'rgba(240,239,236,0.06)'; g.fillRect(LANE.labelW, ya, w - LANE.labelW - 8, yb - ya); }
-    if (d.threshold != null) { const y = Y(d.threshold); g.strokeStyle = COLOR.muted; g.setLineDash([4, 4]); g.lineWidth = 1; g.beginPath(); g.moveTo(LANE.labelW, y); g.lineTo(w - 8, y); g.stroke(); g.setLineDash([]); g.fillStyle = COLOR.muted; g.textBaseline = 'bottom'; g.textAlign = 'right'; g.fillText(`3D-valid threshold ${d.threshold} px`, w - 10, y - 2); g.textAlign = 'left'; }
     for (const side of WEARER) {
       const arr = S.series[side][d.key]; g.strokeStyle = COLOR[side]; g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath(); let pen = false;
       for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v == null) { pen = false; continue; } const x = xOfT(S.times[i], w), y = Y(v); if (!pen) { g.moveTo(x, y); pen = true; } else g.lineTo(x, y); }
@@ -971,7 +948,7 @@ function drawSignals() {
   const yA = SG.top + defs.length * (SG.rowH + SG.gap) - SG.gap + 4;
   g.strokeStyle = COLOR.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(LANE.labelW, yA); g.lineTo(w - 8, yA); g.stroke();
   drawTimeTicks(g, w, yA);
-  drawPlayhead(g, xOfT(S.t, w), SG.top - 4, yA, null);
+  if (S.t >= S.tStart && S.t <= S.tEnd) drawPlayhead(g, xOfT(S.t, w), SG.top - 4, yA, null);
   if (S.hoverSig != null) { const x = xOfT(S.times[S.hoverSig], w); g.strokeStyle = COLOR.ink2; g.lineWidth = 1; g.beginPath(); g.moveTo(x, SG.top - 4); g.lineTo(x, yA); g.stroke(); }
 }
 
@@ -1017,12 +994,12 @@ function renderChips() {
   const c = $('chips'); c.replaceChildren();
   const chip = (label, value, cls = '') => { const e = el('span', { class: 'chip ' + cls }); e.append(document.createTextNode(label + ' '), el('b', {}, value)); c.append(e); };
   if (S.synthetic) { const e = el('span', { class: 'chip warn' }, '⚠ SYNTHETIC DATA · not measured'); c.append(e); }
-  chip('Coverage', S.coverage == null ? '[MEASURE]' : `${(S.coverage * 100).toFixed(1)}% of frames${S.synthetic ? ' (synthetic)' : ''}`, S.coverage == null ? 'measure' : '');
-  if (S.mesh) chip('Meshes', S.meshCoverage == null ? '—' : `${(S.meshCoverage * 100).toFixed(S.meshCoverage < 0.1 ? 1 : 0)}% of observed hands · ${S.mesh.synthetic ? 'synthetic stand-in' : S.mesh.backend}`);
-  chip('Recall', '[MEASURE]', 'measure');
-  chip('FPS', '[MEASURE]', 'measure');
+  if (S.coverage != null) chip('Coverage', `${(S.coverage * 100).toFixed(1)}% of frames${S.synthetic ? ' (synthetic)' : ''}`);
+  if (S.mesh) chip('Meshes', S.meshCoverage == null ? '—' : `${(S.meshCoverage * 100).toFixed(S.meshCoverage < 0.1 ? 1 : 0)}% of observed hands · ${S.mesh.backend}`);
   const m = el('span', { class: 'chip mode' }, S.mode !== 'ours' ? 'Hand-relative 3D · not placed in space'
-    : S.lift ? 'Camera space · assumed lens · experimental' : 'Camera-space estimate (approx. lens model)'); c.append(m);
+    : S.lift ? `Camera space · ${S.camera ? (/assumed/i.test(S.camera.label) ? 'assumed lens' : 'lens from lift') : 'lens not loaded'} · experimental`
+    : S.synthetic ? 'Camera-space estimate (approx. lens model)'
+    : S.frames.some((f) => f.hands.some((h) => h.cam_xyz_m)) ? 'Camera space from the file · lens not recorded' : 'Camera space · no 3D loaded'); c.append(m);
 }
 function renderBreakdown() {
   const b = $('breakdown'); b.replaceChildren();
@@ -1042,17 +1019,19 @@ function renderBreakdown() {
   item({ background: COLOR.wearer_left }, 'observed (left)'); item({ background: COLOR.wearer_right }, 'observed (right)');
   item({ background: COLOR.ink }, 'reacquired'); item({ background: COLOR.wearer_right, opacity: '0.38' }, 'predicted · 2D only');
   item({ background: '#121211', outline: `1px solid ${COLOR.axis}` }, 'lost / not in view');
-  item({ background: COLOR.good, opacity: '0.75' }, '✓ mask true'); item({ background: COLOR.critical, opacity: '0.75' }, '✕ mask false');
+  if (S.lanes.some((L) => L.kind === 'mask' || L.kind === 'mesh')) { item({ background: COLOR.good, opacity: '0.75' }, '✓ mask true'); item({ background: COLOR.critical, opacity: '0.75' }, '✕ mask false'); }
   if (S.mesh) item({ background: COLOR.warning, opacity: '0.85' }, 'mesh for some hands only');
 }
 function renderInspector() {
   const f = S.frames[S.idx], box = $('inspector'); box.replaceChildren(); if (!f) return;
+  if (!inData(S.t)) { box.append(el('p', { class: 'note' }, 'No run data at this time (outside the loaded run’s time range).')); return; }
   const q = f.quality || {}, m = q.masks || {};
   const t1 = el('table', { class: 'inspect' }), tb1 = el('tbody');
   const kv = (k, v, cls) => { const tr = el('tr'); tr.append(el('td', { class: 'k' }, k)); const td = el('td', cls ? { class: cls } : {}, v); tr.append(td); tb1.append(tr); };
   kv('Frame · time', `${f.frame_index} · ${fmtT(f.timestamp_s)}`);
-  kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : String(q.blur_laplacian_var));
-  for (const [k, lab] of [['hand_observed', 'Hand observed'], ['low_blur', 'Low blur'], ['cam_space_valid', '3D valid']]) kv(lab, m[k] === true ? '✓ yes' : m[k] === false ? '✕ no' : 'n/a', m[k] === true ? 'ok' : m[k] === false ? 'bad' : 'na');
+  if (S.avail.blur) kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : String(q.blur_laplacian_var));
+  for (const [k, lab] of [['hand_observed', 'Hand observed'], ['low_blur', 'Low blur'], ['cam_space_valid', '3D valid']])
+    if (k === 'hand_observed' || S.lanes.some((L) => L.key === k)) kv(lab, m[k] === true ? '✓ yes' : m[k] === false ? '✕ no' : 'n/a', m[k] === true ? 'ok' : m[k] === false ? 'bad' : 'na');
   t1.append(tb1); box.append(t1);
   const hands = (f.hands || []).filter((h) => h.state !== 'retired');
   const t2 = el('table', { class: 'inspect' }); t2.style.marginTop = '10px';
@@ -1060,20 +1039,20 @@ function renderInspector() {
   const tb = el('tbody'); t2.append(el('thead'), tb); t2.tHead.append(head);
   if (!hands.length) { box.append(el('p', { class: 'note' }, 'No hands in this frame.')); return; }
   const rows = [
-    ['State', (h) => h.state], ['Detected by', (h) => h.detection_origin ? h.detection_origin.replace(/_/g, ' ') : '—'],
-    ['Wrist depth', (h) => wristDepth(h) == null ? '—' : num(wristDepth(h), 3) + ' m'],
-    ['Grip aperture', (h) => h.grip_aperture_m == null ? '—' : num(h.grip_aperture_m, 3) + ' m'],
-    ['Reprojection', (h) => h.quality && h.quality.reprojection_error_px != null ? num(h.quality.reprojection_error_px, 1) + ' px' : '—'],
-    ['Bone-length CV', (h) => h.quality && h.quality.bone_length_cv != null ? num(h.quality.bone_length_cv, 3) : '—'],
-    ['Depth plausible', (h) => h.quality && h.quality.depth_plausible != null ? (h.quality.depth_plausible ? '✓ yes' : '✕ no') : '—'],
-    ['P(right)', (h) => h.side_probability_right == null ? '—' : num(h.side_probability_right, 2)],
-    ['Side from', (h) => h._side_source || (S.synthetic ? 'synthetic' : 'file')],
-    ['Confidence', (h) => h.confidence == null ? 'none (not calibrated)' : num(h.confidence, 2)],
-    ['3D source', (h) => h.provenance && h.provenance.cam_xyz_m ? h.provenance.cam_xyz_m : '—'],
-    ['Mesh', (h) => { const m = meshFor(f, h); return m ? (S.mesh.synthetic ? 'stand-in (synthetic)' : `✓ ${S.mesh.backend}`) : S.mesh && HAS_3D.has(h.state) && h.anatomical_side !== 'other' ? 'none (skeleton)' : '—'; }],
-    ['Mesh–PnP depth gap', (h) => { const m = meshFor(f, h); return m && m.gap_m != null ? num(m.gap_m * 100, 1) + ' cm' : '—'; }],
+    ['State', null, (h) => h.state], ['Detected by', null, (h) => h.detection_origin ? h.detection_origin.replace(/_/g, ' ') : '—'],
+    ['Wrist depth', 'wristDepth', (h) => wristDepth(h) == null ? '—' : num(wristDepth(h), 3) + ' m'],
+    ['Grip aperture', 'aperture', (h) => h.grip_aperture_m == null ? '—' : num(h.grip_aperture_m, 3) + ' m'],
+    ['Reprojection', 'reproj', (h) => h.quality && h.quality.reprojection_error_px != null ? num(h.quality.reprojection_error_px, 1) + ' px' : '—'],
+    ['Bone-length CV', 'boneCv', (h) => h.quality && h.quality.bone_length_cv != null ? num(h.quality.bone_length_cv, 3) : '—'],
+    ['Depth plausible', 'depthPlausible', (h) => h.quality && h.quality.depth_plausible != null ? (h.quality.depth_plausible ? '✓ yes' : '✕ no') : '—'],
+    ['P(right)', 'pRight', (h) => h.side_probability_right == null ? '—' : num(h.side_probability_right, 2)],
+    ['Side from', null, (h) => h._side_source || (S.synthetic ? 'synthetic' : 'file')],
+    ['Confidence', 'confidence', (h) => h.confidence == null ? 'none (not calibrated)' : num(h.confidence, 2)],
+    ['3D source', 'camSource', (h) => h.provenance && h.provenance.cam_xyz_m ? h.provenance.cam_xyz_m : '—'],
+    ['Mesh', 'mesh', (h) => { const m = meshFor(f, h); return m ? `✓ ${S.mesh.backend}` : S.mesh && HAS_3D.has(h.state) && h.anatomical_side !== 'other' ? 'none (skeleton)' : '—'; }],
+    ['Mesh–PnP depth gap', 'meshGap', (h) => { const m = meshFor(f, h); return m && m.gap_m != null ? num(m.gap_m * 100, 1) + ' cm' : '—'; }],
   ];
-  for (const [lab, fn] of rows) { const tr = el('tr'); tr.append(el('td', { class: 'k' }, lab)); for (const h of hands) tr.append(el('td', {}, fn(h))); tb.append(tr); }
+  for (const [lab, need, fn] of rows) { if (need && !S.avail[need]) continue; const tr = el('tr'); tr.append(el('td', { class: 'k' }, lab)); for (const h of hands) tr.append(el('td', {}, fn(h))); tb.append(tr); }
   box.append(t2);
   box.append(el('p', { class: 'prov' }, 'Provenance: measured = timestamps and image stats; predicted = model output; inferred = geometry and rules (camera-space 3D, grip aperture, side).'));
 }
@@ -1098,8 +1077,8 @@ function highlightEvents() {
 }
 function renderHeader() {
   const f = S.frames[S.idx];
-  $('clipInfo').textContent = `${S.clipId} · ${fmtT(S.t)} · frame ${f ? f.frame_index : '—'}`;
-  $('timeInfo').textContent = `${fmtT(S.t)} / ${fmtT(S.duration)} · ${S.fps.toFixed(1)} fps`;
+  $('clipInfo').textContent = `${S.clipId} · ${fmtT(S.t)} · frame ${f && inData(S.t) ? f.frame_index : '—'}`;
+  $('timeInfo').textContent = `${fmtT(S.t)} / ${fmtT(S.tEnd)} · ${S.fps.toFixed(1)} fps`;
 }
 
 /* ================================================================== EXPORTS */
@@ -1214,59 +1193,126 @@ function parseNpy(u8) {
 }
 
 /* ================================================================== PIPELINE RESULTS (Add results) */
-function setCamera(hfov, vfov, label) { S.camera = { hfov, vfov, label }; }
 function threeBadgeText() {
   if (S.mode !== 'ours') return 'Hand-relative 3D estimates. Factory position and camera motion are not reconstructed.';
-  if (S.lift) return `EXPERIMENTAL camera space · ${S.camera.label} · depth unvalidated`;
-  if (S.synthetic || S.frames.some((f) => f.hands.some((h) => h.cam_xyz_m))) return 'Camera-space estimate (approx. lens model)';
+  if (S.lift) return `EXPERIMENTAL camera space · ${S.camera ? S.camera.label : 'lens not loaded (add the matching lift_*.json)'} · depth unvalidated`;
+  if (S.synthetic) return 'Camera-space estimate (approx. lens model)';
+  if (S.frames.some((f) => f.hands.some((h) => h.cam_xyz_m))) return 'Camera-space 3D from the file · lens not recorded';
   return 'No camera-space 3D in this file · use "Add results" with lift_*.npz';
 }
 function updateThreeBadge() { $('threeBadge').textContent = threeBadgeText(); }
-// identity.json from `egohand identity`: one whole-track left/right vote per short-term track ("unknown" is kept).
+// identity.json from `egohand identity`: one whole-track left/right vote per short-term track. A decisive vote replaces
+// sides that were unavailable (tracker fallback or unknown); sides already established by the file are kept;
+// an "unknown" vote leaves the tracker fallback in place.
 function applyIdentity(obj) {
+  const runTracks = new Set(S.frames.flatMap((f) => f.hands.map((h) => String(h.track_id))));
+  if (!Object.keys(obj.tracks).some((t) => runTracks.has(t))) throw new Error('none of its tracks are in the loaded run');
   const map = { Right: 'wearer_right', Left: 'wearer_left' };
-  let hands = 0;
+  let updated = 0, kept = 0, undecided = 0;
   for (const f of S.frames) for (const h of f.hands) {
-    const t = obj.tracks[String(h.track_id)];
-    if (!t || h._side_source === 'file') continue;   // schema files already carry their own anatomical side
-    h.anatomical_side = map[t.side_vote] || 'unknown'; h._side_source = 'identity.json (whole-track vote)'; hands++;
+    if (h._side_source !== 'tracker (online)' && h._side_source !== 'unavailable') { kept++; continue; }
+    const vote = map[(obj.tracks[String(h.track_id)] || {}).side_vote];
+    if (!vote) { undecided++; continue; }
+    h.anatomical_side = vote; h._side_source = 'whole-track vote';
+    h.anatomical_side_basis = 'whole-track vote from identity.json (assumes the hand belongs to the wearer)';
+    h.provenance = Object.assign({}, h.provenance, { anatomical_side: 'inferred' });
+    updated++;
   }
   S.sideSource = 'identity.json';
-  return `whole-track side for ${Object.keys(obj.tracks).length} tracks (${hands} hand records)`;
+  return `whole-track side applied to ${updated} hand records` + (kept ? `, ${kept} kept (side already set by the file)` : '') +
+    (undecided ? `, ${undecided} without a decisive vote keep the tracker side` : '');
 }
-// lift_<tag>.json from `egohand lift`: the assumed lens used for that lift.
-function applyLiftSummary(obj) {
-  const c = obj.camera, vfov = c.width && c.height ? c.hfov_deg * c.height / c.width : c.hfov_deg * 9 / 16;
-  setCamera(c.hfov_deg, vfov, `assumed ${String(c.model || 'lens').replace(/_/g, ' ')} HFOV ${c.hfov_deg}°`);
-  S.camera.fromSummary = true;
-  return `lens ${S.camera.label}; ${obj.lifted}/${obj.observed_hands} hands lifted by the pipeline`;
+// ---- Camera-space lift (`egohand lift`). lift_<tag>.json records the lens actually used for the lift; the .npz has no
+// lens fields, so the pair is matched by tag, FOV, row counts and by reprojecting the joints with the summary's lens.
+const liftTag = (name) => { const m = /^lift_(.+)\.(npz|json)$/i.exec(name); return m ? m[1] : null; };
+const tagHfov = (tag) => { const m = /hfov(\d+(?:\.\d+)?)/i.exec(tag || ''); return m ? +m[1] : null; };
+const median = (a) => { const b = a.filter(Number.isFinite).sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : null; };
+function liftLens(summary) {
+  const c = summary.obj.camera;
+  return { hfov: c.hfov_deg, vfov: c.width && c.height ? c.hfov_deg * c.height / c.width : null, source: summary.name,
+    label: `${String(c.model || 'lens').replace(/_/g, ' ')} HFOV ${c.hfov_deg}° · ${c.status || 'calibration status not recorded'}` };
 }
-// lift_<tag>.npz from `egohand lift`: camera-space joints for observed hands, keyed by (frame_index, track_id).
+// Median per-hand RMS error (px) when camera-space joints are projected with an equidistant fisheye (r = f·θ, as in lift.py).
+function lensReprojectionPx(c, pairs) {
+  return median(pairs.map(({ joints, img }) => {
+    let se = 0;
+    for (let j = 0; j < 21; j++) {
+      const [x, y, z] = joints[j], rho = Math.hypot(x, y), k = rho > 1e-12 ? c.f_px * Math.atan2(rho, z) / rho : 0;
+      const du = c.cx + x * k - img[j][0] * c.width, dv = c.cy + y * k - img[j][1] * c.height; se += du * du + dv * dv;
+    }
+    return Math.sqrt(se / 21);
+  }));
+}
+function liftMismatch(summary, lift) {
+  const c = summary.obj.camera, fov = tagHfov(lift.tag);
+  if (summary.tag && lift.tag && summary.tag !== lift.tag) return `${summary.name} and ${lift.name} come from different lifts (tags "${summary.tag}" and "${lift.tag}")`;
+  if (fov != null && Math.abs(fov - c.hfov_deg) > 0.5) return `${lift.name} was lifted with HFOV ${fov}° but ${summary.name} describes HFOV ${c.hfov_deg}°`;
+  if (summary.obj.observed_hands !== lift.rows || summary.obj.lifted !== lift.okRows)
+    return `${summary.name} reports ${summary.obj.lifted}/${summary.obj.observed_hands} hands lifted but ${lift.name} has ${lift.okRows}/${lift.rows}`;
+  if (c.model === 'equidistant_fisheye' && [c.f_px, c.cx, c.cy, c.width, c.height].every(Number.isFinite) && lift.pairs.length) {
+    const px = lensReprojectionPx(c, lift.pairs), ref = lift.rmseMedian ?? 10;
+    if (px > 1.5 * ref + 5) return `the joints in ${lift.name} do not reproject with the lens in ${summary.name} (median ${px.toFixed(1)} px; the lift reports ${ref.toFixed(1)} px)`;
+  }
+  return null;
+}
+// lift_<tag>.json: stored by tag; applied to the shown lift only if it describes that lift.
+function applyLiftSummary(obj, name) {
+  const c = obj.camera || {};
+  if (!Number.isFinite(c.hfov_deg)) throw new Error('the summary has no camera.hfov_deg');
+  const summary = { name, tag: liftTag(name), obj }, fov = tagHfov(summary.tag);
+  if (fov != null && Math.abs(fov - c.hfov_deg) > 0.5) throw new Error(`its file name says HFOV ${fov}° but its camera block says ${c.hfov_deg}°`);
+  if (S.lift && summary.tag && S.lift.tag && summary.tag !== S.lift.tag) {   // belongs to another lift, e.g. a FOV sweep
+    S.liftSummaries.set(summary.tag, summary);
+    return `kept for lift_${summary.tag}.npz; it does not describe the shown ${S.lift.name}, so the lens shown is unchanged`;
+  }
+  if (S.lift) { const why = liftMismatch(summary, S.lift); if (why) throw new Error(`${why}. The camera space shown and its lens are unchanged`); }
+  S.liftSummaries.set(summary.tag || name, summary);
+  if (S.lift) { S.camera = liftLens(summary); S.lift.summary = name; }
+  return `lens ${liftLens(summary).label}` + (S.lift ? '' : ' (used when the matching lift_*.npz is loaded)');
+}
+const LIFT_FIELDS = ['cam_xyz_m', 'cam_xyz_m_raw', 'wrist_pose_cam', 'grip_aperture_m', 'quality', 'provenance'];
+function clearLift(h) { for (const k of LIFT_FIELDS) h[k] = h._preLift[k]; delete h._preLift; delete h._lift; }
+// lift_<tag>.npz: camera-space joints for observed hands, keyed by (frame_index, track_id). Validated completely before
+// anything is merged; a new lift replaces the previous one instead of mixing with it.
 function applyLift(a, name) {
   for (const k of ['frame_index', 'track_id', 'joints_cam_m']) if (!a[k]) throw new Error(`missing array ${k}`);
   const n = a.frame_index.shape[0], J = a.joints_cam_m.data, ok = a.ok ? a.ok.data : null, rm = a.reproj_rmse_px ? a.reproj_rmse_px.data : null;
   const byFrame = new Map(S.frames.map((f) => [f.frame_index, f]));
-  let merged = 0, rejected = 0, notObserved = 0, unmatched = 0;
+  const rows = []; let rejected = 0, notObserved = 0, unmatched = 0;
   for (let i = 0; i < n; i++) {
-    if (ok && !ok[i]) { rejected++; continue; }
     const f = byFrame.get(Number(a.frame_index.data[i])), h = f && f.hands.find((x) => x.track_id === Number(a.track_id.data[i]));
     if (!h) { unmatched++; continue; }
+    if (ok && !ok[i]) { rejected++; continue; }
     if (!HAS_3D.has(h.state)) { notObserved++; continue; }   // 3D is never attached to predicted or lost hands
     const joints = []; for (let j = 0; j < 21; j++) { const o = (i * 21 + j) * 3; joints.push([J[o], J[o + 1], J[o + 2]]); }
-    if (!joints.every((p) => p.every(Number.isFinite))) { rejected++; continue; }
+    if (!joints.every((q) => q.every(Number.isFinite))) { rejected++; continue; }
+    rows.push({ h, joints, rmse: rm ? rm[i] : null });
+  }
+  if (unmatched) throw new Error(`${unmatched} of ${n} rows reference frames or tracks that are not in the loaded run (a lift of a different run?)`);
+  const lift = { name, tag: liftTag(name), rows: n, okRows: ok ? ok.reduce((c, v) => c + (v ? 1 : 0), 0) : n,
+    rmseMedian: rm ? median(Array.from(rm).filter((_, i) => !ok || ok[i])) : null,
+    pairs: rows.filter((r) => r.h.image_xyz_raw).slice(0, 300).map((r) => ({ joints: r.joints, img: r.h.image_xyz_raw })) };
+  const summaries = [...S.liftSummaries.values()];
+  const summary = (lift.tag && S.liftSummaries.get(lift.tag)) || (!lift.tag && summaries.length === 1 ? summaries[0] : null);
+  if (!summary && summaries.length) throw new Error(`no matching lift summary (expected lift_${lift.tag ?? '<tag>'}.json; loaded: ${summaries.map((x) => x.name).join(', ')})`);
+  if (summary) { const why = liftMismatch(summary, lift); if (why) throw new Error(why); }
+  const replaced = S.lift ? S.lift.name : null;
+  for (const f of S.frames) for (const h of f.hands) if (h._preLift) clearLift(h);
+  for (const { h, joints, rmse } of rows) {
+    h._preLift = Object.fromEntries(LIFT_FIELDS.map((k) => [k, h[k]]));
     h.cam_xyz_m = joints; h.cam_xyz_m_raw = joints;           // lift works on raw landmarks; there is no smoothed variant
     h.wrist_pose_cam = null;                                 // orientation is not exported by the lift
     h.grip_aperture_m = dist3(joints[4], joints[8]);
-    h.quality = Object.assign({}, h.quality, { reprojection_error_px: rm ? rm[i] : null,
+    h.quality = Object.assign({}, h.quality, { reprojection_error_px: rmse,
       depth_plausible: joints[0][2] >= PLAUSIBLE_DEPTH[0] && joints[0][2] <= PLAUSIBLE_DEPTH[1] });
     h.provenance = Object.assign({}, h.provenance, { cam_xyz_m: 'inferred', grip_aperture_m: 'inferred' });
-    h._lift = name; merged++;
+    h._lift = name;
   }
-  S.lift = { name, merged };
-  const fov = /hfov(\d+(?:\.\d+)?)/i.exec(name);
-  if (!S.camera.fromSummary && fov) setCamera(+fov[1], +fov[1] * 9 / 16, `assumed equidistant fisheye HFOV ${+fov[1]}° (from file name)`);
-  return `${merged} hands in camera space` + (rejected ? `, ${rejected} rejected by the lift` : '') +
-    (notObserved ? `, ${notObserved} skipped (hand not observed)` : '') + (unmatched ? `, ${unmatched} not in the loaded frames` : '');
+  S.lift = { name, tag: lift.tag, rows: n, okRows: lift.okRows, rmseMedian: lift.rmseMedian, merged: rows.length, summary: summary ? summary.name : null,
+    get pairs() { return S.frames.flatMap((f) => f.hands.filter((h) => h._lift === name && h.image_xyz_raw).map((h) => ({ joints: h.cam_xyz_m, img: h.image_xyz_raw }))).slice(0, 300); } };
+  S.camera = summary ? liftLens(summary) : null;            // without the summary the lens is unknown; nothing is assumed
+  return `${rows.length} hands in camera space` + (replaced ? ` (replaces ${replaced})` : '') + (rejected ? `, ${rejected} rejected by the lift` : '') +
+    (notObserved ? `, ${notObserved} skipped (hand not observed)` : '') + (summary ? `, lens from ${summary.name}` : '; lens not loaded: add the matching lift_*.json');
 }
 async function addResultFile(file) {
   const name = file.name.toLowerCase();
@@ -1285,7 +1331,7 @@ async function addResultFile(file) {
   const obj = JSON.parse(text);
   if (obj && Array.isArray(obj.meshes)) return applyMesh(meshFromRecords(obj, obj.meshes, file.name), file.name);
   if (obj && obj.tracks && obj.method) return applyIdentity(obj);
-  if (obj && obj.camera && /experimental/i.test(obj.status || '')) return applyLiftSummary(obj);
+  if (obj && obj.camera && /experimental/i.test(obj.status || '')) return applyLiftSummary(obj, file.name);
   throw new Error('unrecognised JSON');
 }
 function afterResults() {
@@ -1296,6 +1342,7 @@ $('fileResults').addEventListener('change', async (ev) => {
   const files = [...ev.target.files]; ev.target.value = '';
   if (!files.length) return;
   if (!S.frames.length) { toast('Load a landmarks.jsonl first.'); return; }
+  if (S.synthetic) { toast('Results cannot be added to the synthetic demo. Load a real landmarks.jsonl first; real and synthetic data are never merged.'); return; }
   // Summaries first, so a lift_*.json can describe the lens before its .npz is merged.
   files.sort((a, b) => (/\.json$/i.test(a.name) ? 0 : 1) - (/\.json$/i.test(b.name) ? 0 : 1));
   const msgs = [];
@@ -1309,21 +1356,36 @@ $('fileResults').addEventListener('change', async (ev) => {
 /* ================================================================== LOADING */
 function loadFrames(frames, { synthetic, clipId }) {
   S.frames = frames; S.synthetic = synthetic; S.clipId = clipId; S.idx = 0; S.t = 0;
-  S.camera = { ...DEFAULT_CAMERA }; S.lift = null; S.sideSource = null;
-  S.mesh = synthetic ? makeStandInMeshes(frames) : null;
-  deriveAll(); seek(0); renderChips(); renderBreakdown(); renderEvents(); updateThreeBadge(); renderMeshNote();
+  S.camera = synthetic ? { ...DEFAULT_CAMERA } : null;   // real runs: lens unknown until lift metadata is loaded
+  S.lift = null; S.liftSummaries = new Map(); S.sideSource = null;
+  $('fileResults').disabled = synthetic; $('lblResults').classList.toggle('disabled', synthetic);
+  $('lblResults').setAttribute('aria-disabled', String(synthetic));
+  updateVideoBadge();
+  S.mesh = null;   // meshes come only from a loaded mesh file; there is no synthetic stand-in
+  deriveAll(); seek(S.tStart); renderChips(); renderBreakdown(); renderEvents(); updateThreeBadge(); renderMeshNote();
   $('footer').textContent = synthetic
     ? 'Prototype. With the synthetic demo data, every value on screen is made up to show the layout, and none of it is a measurement.'
     : `Loaded ${frames.length} frames from a local file. Nothing has been uploaded. Coverage counts frames with a tracked wearer hand. That is coverage, not accuracy.`;
   S.dirty = true;
 }
-// The running pipeline (egohand process) writes side "Right"/"Left" from the online tracker and no anatomical_side.
-// Map it onto the schema's wearer sides (convention verified on the dev clip: no mirroring needed) and remember the source.
+// The running pipeline (egohand process) writes the online tracker's side ("Right"/"Left") and anatomical_side "unknown"
+// (older runs omit anatomical_side). A missing or "unknown" anatomical side is treated as unavailable: the viewer falls
+// back to the tracker side (convention verified on the dev clip: no mirroring needed) and records that it did so.
+// Valid sides from the file (e.g. landmarks.identity.jsonl from `egohand identity --write-jsonl`) are kept as they are.
+const VALID_SIDES = new Set(['wearer_left', 'wearer_right', 'other']);
 function normalizeHand(h) {
-  if (!h.anatomical_side) {
+  if (VALID_SIDES.has(h.anatomical_side)) {
+    if (!h._side_source) h._side_source = /whole-track vote/i.test(h.anatomical_side_basis || '') ? 'whole-track vote' : 'file';
+  } else {
+    h._raw_anatomical_side = h.anatomical_side ?? null;
     h.anatomical_side = h.side === 'Right' ? 'wearer_right' : h.side === 'Left' ? 'wearer_left' : 'unknown';
-    h._side_source = 'tracker (online)';
-  } else if (!h._side_source) h._side_source = 'file';
+    if (h.anatomical_side === 'unknown') h._side_source = 'unavailable';
+    else {
+      h._side_source = 'tracker (online)';
+      h.anatomical_side_basis = 'online tracker side (viewer fallback; anatomical side was not available)';
+      h.provenance = Object.assign({}, h.provenance, { anatomical_side: 'inferred' });
+    }
+  }
   if (h.side_probability_right == null && typeof h.side_probability_right_smoothed === 'number') h.side_probability_right = h.side_probability_right_smoothed;
 }
 function parseJsonl(text) {
@@ -1351,36 +1413,41 @@ $('fileJsonl').addEventListener('change', async (ev) => {
   if (msgs.length) toast(msgs.join(' · '));
   ev.target.value = '';
 });
+for (const evName of ['seeked', 'pause']) $('video').addEventListener(evName, snapToVideo);
+function updateVideoBadge() {
+  if (!S.video) return;
+  $('videoBadge').textContent = S.synthetic ? 'Local video · the overlay is SYNTHETIC demo data, not from this video' : 'Local video · stays on this laptop';
+}
 $('fileVideo').addEventListener('change', (ev) => {
   const file = ev.target.files[0]; if (!file) return;
   const v = $('video'); if (v.src) URL.revokeObjectURL(v.src);
   v.src = URL.createObjectURL(file); S.video = v;
   v.addEventListener('loadeddata', () => { seek(S.t); S.dirty = true; }, { once: true });
-  $('videoBadge').textContent = 'Local video · stays on this laptop';
+  updateVideoBadge();
   ev.target.value = '';
 });
 $('btnDemo').addEventListener('click', () => { setPlaying(false); loadFrames(makeSynthetic(), { synthetic: true, clipId: 'synthetic_demo' }); });
 
 /* ================================================================== CONTROLS */
 $('btnPlay').addEventListener('click', () => setPlaying(!S.playing));
-$('btnBack').addEventListener('click', () => { setPlaying(false); seek(S.times[Math.max(0, S.idx - 1)] ?? 0); });
-$('btnFwd').addEventListener('click', () => { setPlaying(false); seek(S.times[Math.min(S.times.length - 1, S.idx + 1)] ?? 0); });
+$('btnBack').addEventListener('click', () => stepFrame(-1));
+$('btnFwd').addEventListener('click', () => stepFrame(1));
 $('selSpeed').addEventListener('change', (e) => { S.speed = +e.target.value; if (S.video) S.video.playbackRate = S.speed; });
 function bindSeg(id, fn) { const g = $(id); g.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; for (const x of g.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); fn(b.dataset.v); }); }
 bindSeg('segMode', (v) => { S.mode = v; updateThreeBadge(); renderChips(); S.dirty = true; });
 bindSeg('segSmooth', (v) => { S.smooth = v === 'smooth'; S.dirty = true; });
 bindSeg('segDisplay', (v) => { S.display = v; S.dirty = true; });
 bindSeg('segEvents', (v) => { S.eventFilter = v; renderEvents(); S.dirty = true; });
-for (const id of ['chkTrails', 'chkGripper']) $(id).addEventListener('change', () => (S.dirty = true));
+for (const id of ['chkTrails']) $(id).addEventListener('change', () => (S.dirty = true));
 $('expEvents').addEventListener('click', exportEvents);
 $('expJsonl').addEventListener('click', exportJsonl);
 $('expAria').addEventListener('click', exportAria);
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea')) return;
   if (e.code === 'Space') { e.preventDefault(); setPlaying(!S.playing); }
-  else if (e.code === 'ArrowLeft') { setPlaying(false); seek(S.times[Math.max(0, S.idx - 1)] ?? 0); }
-  else if (e.code === 'ArrowRight') { setPlaying(false); seek(S.times[Math.min(S.times.length - 1, S.idx + 1)] ?? 0); }
-  else if (e.code === 'Home') seek(0);
+  else if (e.code === 'ArrowLeft') stepFrame(-1);
+  else if (e.code === 'ArrowRight') stepFrame(1);
+  else if (e.code === 'Home') seek(S.tStart);
 });
 // Orbit / zoom for the 3D panel
 (() => {
@@ -1399,15 +1466,19 @@ new ResizeObserver(() => (S.dirty = true)).observe(document.body);
 let lastIdx = -1;
 function tick(now) {
   if (S.playing) {
-    if (S.video && !S.video.paused) S.t = S.video.currentTime;
-    else S.t += ((now - S.lastTick) / 1000) * S.speed;
-    S.lastTick = now;
-    if (S.t >= S.duration) { S.t = S.duration - 1e-3; setPlaying(false); }
+    if (S.video && S.video.ended) setPlaying(false);
+    else {
+      if (S.video && !S.video.paused) S.t = S.video.currentTime;
+      else S.t += ((now - S.lastTick) / 1000) * S.speed;
+      S.lastTick = now;
+      if (S.t >= S.tEnd) { S.t = S.tEnd - 1e-3; setPlaying(false); }
+    }
     S.idx = indexAt(S.t); S.dirty = true;
   }
   if (S.dirty) {
     drawVideo(); drawThree(); drawLanes(); drawSignals(); renderHeader();
-    if (S.idx !== lastIdx) { renderInspector(); highlightEvents(); lastIdx = S.idx; }
+    const panelKey = inData(S.t) ? S.idx : -2;
+    if (panelKey !== lastIdx) { renderInspector(); highlightEvents(); lastIdx = panelKey; }
     S.dirty = false;
   }
   requestAnimationFrame(tick);

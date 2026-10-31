@@ -20,6 +20,21 @@ function Run([string]$what, [scriptblock]$block) {
     if ($LASTEXITCODE -ne 0) { throw "Failed ($LASTEXITCODE): $what" }
 }
 
+# A terminal opened before an install (for example inside an already running VS Code) still has
+# the old PATH. Reload PATH from the registry, then look in winget's install folders, before failing.
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+}
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    $WingetBin = @(Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links') +
+        @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') -Directory -Filter 'Gyan.FFmpeg*' -ErrorAction SilentlyContinue |
+          ForEach-Object { Get-ChildItem $_.FullName -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue } |
+          ForEach-Object { $_.DirectoryName })
+    foreach ($dir in $WingetBin) {
+        if ($dir -and (Test-Path (Join-Path $dir 'ffmpeg.exe'))) { $env:Path = "$dir;$env:Path"; break }
+    }
+}
+
 Need uv 'Install: winget install --id=astral-sh.uv -e   (then open a new PowerShell window)'
 Need ffmpeg 'Install: winget install --id=Gyan.FFmpeg -e   (then open a new PowerShell window)'
 Need ffprobe 'Install FFmpeg (it provides ffprobe)'

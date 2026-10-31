@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+data/
+models/
+runs/
+private/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.rrd
+*.npz
+.DS_Store
+

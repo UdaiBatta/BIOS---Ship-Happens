@@ -58,3 +58,13 @@ def test_neutral_evidence_inherits_the_track_side():
 def test_track_started_by_a_crop_detection_is_undecided_until_evidence():
     out = run([[hand(.3, side="Left", origin="center_crop_rescue")]], **PRESET)
     assert out[0][0]["side_probability_right_smoothed"] == .5 and out[0][0]["side"] == "unknown"
+
+
+def test_two_observed_hands_never_both_shown_with_the_same_weak_side():
+    t = IdentityTracker(**PRESET, pair_margin=.3)
+    for i in range(8):                           # a confident Right hand and a weakly-Right second hand
+        out = t.update([hand(.2, score=.98), hand(.7, score=.62)], i/30)
+    sides = sorted(r["side"] for r in out if r["observed"])
+    assert sides == ["Right", "unknown"]
+    strong = [r for r in out if r["observed"] and r["side"] == "Right"][0]
+    assert strong["side_probability_right_smoothed"] > .8      # strong evidence is never overridden

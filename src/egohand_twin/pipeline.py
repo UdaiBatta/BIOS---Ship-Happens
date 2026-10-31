@@ -171,7 +171,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                                             if getattr(args, "crop_side_weight", None) is not None else None),
                               side_hysteresis=getattr(args, "side_hysteresis", None) or 0.,
                               max_records=8,  # frame schema: at most 8 hand records
-                              last_position_link=bool(getattr(args, "last_position_link", False)))
+                              last_position_link=bool(getattr(args, "last_position_link", False)),
+                              pair_margin=getattr(args, "pair_margin", None))
     rss = psutil.Process()
     peak_rss = rss.memory_info().rss
     latency, sample_rows, events = [], [], []

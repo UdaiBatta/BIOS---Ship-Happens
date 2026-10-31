@@ -31,12 +31,12 @@ from .render import fit_image, text, rebuild_replay
 
 PRESETS = {
     "baseline": {"detection_threshold": .5, "presence_threshold": .5, "tracking_threshold": .5, "rescue_crop": False},
-    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0.},
+    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "pair_margin": .3},
     # recall + a second, reverse-time detection pass (offline only; about 2x detector time).
-    "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0.,
+    "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "pair_margin": .3,
                  "bidirectional": True},
     # recall + an RTMDet hand detector for hands MediaPipe's palm detector misses (needs fetch-model --rtm).
-    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "last_position_link": True,
+    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "pair_margin": .3, "last_position_link": True,
                "hand_detector": True},
 }
 
@@ -245,6 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--last-position-link", action="store_true", default=None,
                    help="Tracker second pass: an unmatched detection rejoins an unmatched recent track near "
                         "where it was last seen (part of --preset hybrid; RTMPose recoveries)")
+    p.add_argument("--pair-margin", type=float, default=None,
+                   help="Two observed hands with the same side: show the one with weaker evidence (|P(right)-0.5| "
+                        "below this) as unknown")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
     p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",

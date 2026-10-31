@@ -143,7 +143,7 @@ class IdentityTracker:
     """Short-term associations, not biometric or guaranteed anatomical identities."""
     def __init__(self, predict_s=.15, retain_s=.8, smoothing=True, frame_size=None, box_link=False,
                  side_weights: dict | None = None, side_hysteresis: float = 0., max_records: int | None = None,
-                 last_position_link: bool = False):
+                 last_position_link: bool = False, pair_margin: float | None = None):
         """``side_weights``: how much one detection's left/right score moves its track's running
         P(right), per detection path (``origin_detail`` or ``origin``; key ``default``). The
         original behaviour is 0.15 for every path. A weight of 0 means the detection carries no
@@ -170,6 +170,11 @@ class IdentityTracker:
         # tracks are retired early (their records dropped); observed hands are never dropped.
         self.max_records = max_records
         self.last_position_link = last_position_link
+        # Two observed hands shown with the same side: the one whose running P(right) is within
+        # ``pair_margin`` of 0.5 is shown as "unknown" (never overrides strong evidence; the track's
+        # own side state is unchanged). Dev: wrong sides 5 -> 2, same-side pair frames 17 -> 0.
+        self.pair_margin = pair_margin
+        self.pair_unknowns = 0
         self.last_position_links = 0
         self.capacity_retired = 0
         self.box_links = 0
@@ -295,6 +300,14 @@ class IdentityTracker:
                 records.append(record(t, "predicted", age, image=image))
             else:
                 records.append(record(t, "lost", age))
+        if self.pair_margin is not None:
+            shown = [r for r in records if r["observed"] and r["side"] in ("Left", "Right")]
+            if len(shown) == 2 and shown[0]["side"] == shown[1]["side"]:
+                weak = min(shown, key=lambda r: abs(r["side_probability_right_smoothed"] - .5))
+                if abs(weak["side_probability_right_smoothed"] - .5) < self.pair_margin:
+                    weak["side"] = "unknown"
+                    weak["side_source"] = "unknown_conflicts_with_simultaneous_hand"
+                    self.pair_unknowns += 1
         if self.max_records is not None and len(records) > self.max_records:
             # longest-unseen first: retired, lost, then predicted (a 2D guess); never observed
             rank = {"retired": 0, "lost": 1, "predicted": 2}

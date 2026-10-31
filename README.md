@@ -1,8 +1,8 @@
-# Therblig
+# DemoForge
 
-Automatic motion study from a head camera: what each hand touched, for how long, and where the workstation wastes hand motion. Every number links to the frame that proves it.
+Turn factory head-camera footage into quality-scored 3D hand episodes: where each hand is in 3D, how it moves, and which clips are good enough to use. Every 3D number states how it was checked.
 
-Hackathon entry for **Problem Statement 2 (what is the hand touching?)**, built on top of reliable two-hand tracking (PS1).
+Hackathon entry for **Problem Statement 4 (3D hand motion)**, built on top of reliable two-hand tracking (PS1).
 
 > Status: setting up. No performance numbers are claimed yet.
 

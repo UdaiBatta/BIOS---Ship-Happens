@@ -15,9 +15,10 @@ need ffmpeg "Install FFmpeg (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt
 need ffprobe "Install FFmpeg (it provides ffprobe)"
 
 echo "==> Installing dependencies"
-uv sync --extra dev --extra viewer --extra backend
+uv sync --extra dev --extra viewer --extra backend --extra hybrid
 uv run egohand fetch-model >/dev/null
 uv run rerun analytics disable >/dev/null 2>&1 || true
+uv run egohand fetch-model --rtm >/dev/null 2>&1 || echo "    (optional RTM hand models not downloaded; the experimental hybrid preset stays hidden)"
 uv run egohand doctor | grep -E '"mediapipe_runtime"' || true
 
 if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.webm" \) 2>/dev/null | grep -q .; then

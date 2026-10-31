@@ -41,6 +41,7 @@ DATA_DIR = Path(os.environ.get("EGOHAND_DATA_DIR", REPO_DIR/"data"/"private"/"ba
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RUNS_DIR = Path(os.environ.get("EGOHAND_RUNS_DIR", REPO_DIR/"runs"/"backend"))
 MODEL_PATH = Path(os.environ.get("EGOHAND_MODEL", REPO_DIR/"models"/"hand_landmarker.task"))
+RTM_MODELS = Path(os.environ.get("EGOHAND_RTM_MODELS", REPO_DIR/"models"/"rtm"))
 # Default allowed video folders: data/private/ and media/ in the repo (both git-ignored).
 MEDIA_ROOTS = [Path(p).resolve() for p in os.environ.get(
     "EGOHAND_MEDIA_ROOTS", os.pathsep.join([str(REPO_DIR/"data"/"private"), str(REPO_DIR/"media")])

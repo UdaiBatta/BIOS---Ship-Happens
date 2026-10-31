@@ -59,6 +59,8 @@ def build_process_argv(run: Run, out_dir: Path) -> list[str]:
         argv.append("--no-video")
     if run.write_rrd:
         argv.append("--rrd")
+    if run.preset == "hybrid":
+        argv += ["--rtm-models", str(settings.RTM_MODELS)]
     if settings.GOVERNANCE_FILE:
         argv += ["--governance", settings.GOVERNANCE_FILE]
     return argv

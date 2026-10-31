@@ -103,11 +103,17 @@ def build_detector(args):
     if args.rescue_crop and rescue:
         raise ValueError("Use either --rescue-crop (historical) or --rescue, not both")
     if args.rescue_crop:
-        return CropRescueDetector(Path(args.model), **options)
-    if rescue:
-        return MultiViewDetector(Path(args.model), strategies=rescue, max_crops=args.max_crops,
-                                 dedupe=args.dedupe, crop_max_side=getattr(args, "crop_max_side", None), **options)
-    return Detector(Path(args.model), **options)
+        detector = CropRescueDetector(Path(args.model), **options)
+    elif rescue:
+        detector = MultiViewDetector(Path(args.model), strategies=rescue, max_crops=args.max_crops,
+                                     dedupe=args.dedupe, crop_max_side=getattr(args, "crop_max_side", None), **options)
+    else:
+        detector = Detector(Path(args.model), **options)
+    if getattr(args, "hand_detector", None):
+        from .hybrid import HybridDetector
+        detector = HybridDetector(detector, Path(args.model), Path(args.rtm_models), args.detection_threshold,
+                                  args.presence_threshold, num_hands=args.num_hands)
+    return detector
 
 
 def process(args, progress=None, detector_override=None, started=None, extra_metrics=None):

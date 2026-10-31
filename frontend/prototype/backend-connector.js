@@ -63,7 +63,7 @@
     const current = select.value;
     select.innerHTML = '';
     for (const [name, info] of Object.entries(data.presets)) {
-      const label = name === 'accurate' ? 'accurate (slower)' : name;
+      const label = name === 'accurate' ? 'accurate (slower)' : name === 'hybrid' ? 'hybrid (experimental)' : name;
       select.append(Object.assign(document.createElement('option'), { value: name, textContent: label, title: `${info.description}. ${info.measured}` }));
     }
     select.value = data.presets[current] ? current : (data.default || 'recall');

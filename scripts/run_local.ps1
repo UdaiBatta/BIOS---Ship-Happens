@@ -24,9 +24,11 @@ Need uv 'Install: winget install --id=astral-sh.uv -e   (then open a new PowerSh
 Need ffmpeg 'Install: winget install --id=Gyan.FFmpeg -e   (then open a new PowerShell window)'
 Need ffprobe 'Install FFmpeg (it provides ffprobe)'
 
-Run 'Installing dependencies' { uv sync --extra dev --extra viewer --extra backend }
+Run 'Installing dependencies' { uv sync --extra dev --extra viewer --extra backend --extra hybrid }
 Run 'Fetching the hand model' { uv run egohand fetch-model | Out-Null }
 uv run rerun analytics disable | Out-Null
+uv run egohand fetch-model --rtm | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Host '    (optional RTM hand models not downloaded; the experimental hybrid preset stays hidden)' }
 Run 'Checking the MediaPipe runtime' { uv run egohand doctor | Select-String 'mediapipe_runtime' }
 
 $HasMedia = (Test-Path (Join-Path $Root 'media')) -and (Get-ChildItem (Join-Path $Root 'media') -Recurse -File -Include *.mp4,*.mov,*.mkv,*.avi,*.m4v,*.webm | Select-Object -First 1)

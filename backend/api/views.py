@@ -31,7 +31,24 @@ PRESETS = {
     "accurate": {"description": "recall + a reverse-time detection pass; about 2x detector time",
                  "measured": "holdout recall 46/78, precision 46/48 (provisional labels, one clip); "
                              "dev 41/72 with no false positives"},
+    "hybrid": {"description": "EXPERIMENTAL: recall + an RTMDet hand detector for hands MediaPipe misses; "
+                              "RTMPose 2D with fitted depth where MediaPipe still fails; about 3x slower",
+               "measured": "dev: no recall gain (36/72) and 11 false positives (precision 0.77), provisional "
+                           "labels, one clip; try it on other recording families only"},
 }
+
+
+def available_presets() -> dict:
+    """Presets this installation can run (hybrid needs onnxruntime and the RTM hand models)."""
+    names = dict(PRESETS)
+    try:
+        import onnxruntime  # noqa: F401
+        ready = all((settings.RTM_MODELS/n).exists() for n in ("rtmdet_nano_hand.onnx", "rtmpose_m_hand.onnx"))
+    except ImportError:
+        ready = False
+    if not ready:
+        names.pop("hybrid")
+    return names
 
 
 class ApiError(Exception):
@@ -107,7 +124,7 @@ def health(request):
 
 @api(("GET",))
 def presets(request):
-    return {"presets": PRESETS, "default": "recall",
+    return {"presets": available_presets(), "default": "recall",
             "note": "Measurements are provisional (labels not yet human-reviewed) and from one clip."}
 
 
@@ -209,11 +226,12 @@ def runs(request):
     video_id = field("video_id", int)
     if video_id is None:
         raise ApiError("video_id is required")
+    preset = data.get("preset", "recall")
+    if preset not in available_presets():  # cheap checks first: no video hashing for a bad request
+        raise ApiError(f"preset must be one of {sorted(available_presets())}"
+                       + (" (hybrid needs: uv sync --extra hybrid; egohand fetch-model --rtm)" if preset == "hybrid" else ""))
     video = Video.objects.get(pk=video_id)
     services.assert_video_unchanged(video)
-    preset = data.get("preset", "recall")
-    if preset not in PRESETS:
-        raise ApiError(f"preset must be one of {sorted(PRESETS)}")
     start = field("start_s", float, 0.)
     duration = field("duration_s", float)
     timestamps = services.video_timestamps(video)

@@ -35,6 +35,9 @@ PRESETS = {
     # recall + a second, reverse-time detection pass (offline only; about 2x detector time).
     "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True,
                  "bidirectional": True},
+    # recall + an RTMDet hand detector for hands MediaPipe's palm detector misses (needs fetch-model --rtm).
+    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True,
+               "hand_detector": True},
 }
 
 
@@ -184,6 +187,15 @@ def governance_init(a):
     print(out)
 
 
+def fetch_command(a):
+    report = fetch_model(Path(a.model))
+    if a.rtm:
+        from .hybrid import fetch_rtm_models
+        report = {"mediapipe": report,
+                  "rtm": fetch_rtm_models(Path(a.rtm_models), Path(a.rtm_zips) if a.rtm_zips else None)}
+    print(json.dumps(report, indent=2))
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The single source of truth for command options (also used by the Django job worker)."""
     parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
@@ -192,7 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=doctor)
     p = commands.add_parser("fetch-model", help="Download the versioned official MediaPipe task model")
     p.add_argument("--model", default="models/hand_landmarker.task")
-    p.set_defaults(func=lambda a: print(json.dumps(fetch_model(Path(a.model)), indent=2)))
+    p.add_argument("--rtm", action="store_true",
+                   help="Also download the RTMDet/RTMPose hand models (Apache-2.0) for --preset hybrid")
+    p.add_argument("--rtm-models", default="models/rtm")
+    p.add_argument("--rtm-zips", help="Folder that already holds the two OpenMMLab zips (no download)")
+    p.set_defaults(func=fetch_command)
     p = commands.add_parser("process", help="Export landmarks and synchronized replay")
     p.add_argument("video")
     p.add_argument("--out", required=True)
@@ -223,7 +239,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",
                    help="baseline: MediaPipe defaults (historical B0). recall: thresholds 0.3 + centre-crop rescue, "
                         "chosen on dev labels and confirmed once on holdout (provisional labels). accurate: recall + a reverse-time "
-                        "pass (about 2x detector time). Explicit flags override.")
+                        "pass (about 2x detector time). hybrid: recall + an RTMDet hand detector (needs fetch-model --rtm). "
+                        "Explicit flags override.")
+    p.add_argument("--hand-detector", action="store_true", default=None,
+                   help="Add an RTMDet hand detector for hands MediaPipe misses (part of --preset hybrid; "
+                        "needs: egohand fetch-model --rtm)")
+    p.add_argument("--rtm-models", default="models/rtm", help="Folder with the RTM hand models")
     p.add_argument("--bidirectional", action="store_true", default=None,
                    help="Also run detection backwards in time and add hands the forward pass missed "
                         "(offline; about 2x detector time; part of --preset accurate)")

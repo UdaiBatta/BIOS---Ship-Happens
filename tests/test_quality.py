@@ -140,7 +140,7 @@ def test_strided_camera_motion_spans_requested_frames(tmp_path, monkeypatch):
     writer.release()
     calls = []
     monkeypatch.setattr("egohand_twin.quality.frame_stats", lambda frame, _width: (
-        np.arange(4, dtype=np.uint8).reshape(2, 2) + int(frame[0, 0, 0]),
+        np.arange(0, 40, 10, dtype=np.uint8).reshape(2, 2) + int(frame[0, 0, 0]),  # textured stand-in (std > MIN_TEXTURE_STD)
         {"blur_laplacian_var": 1., "mean_luma": 0., "overexposed_fraction": 0., "underexposed_fraction": 0.}))
     monkeypatch.setattr("egohand_twin.quality.cv2.phaseCorrelate",
                         lambda previous, current: (calls.append((float(previous.mean()), float(current.mean()))) or ((0., 0.), 1.)))

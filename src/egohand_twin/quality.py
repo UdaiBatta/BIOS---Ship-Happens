@@ -95,6 +95,9 @@ def frame_stats(bgr: np.ndarray, analysis_width: int = 320) -> tuple[np.ndarray,
                   "underexposed_fraction": float(np.mean(gray <= 15))}
 
 
+MIN_TEXTURE_STD = 2.0  # gray levels; JPEG noise on a constant frame is ~0.3, real footage is tens
+
+
 def image_signals(video: Path, frame_indices: list[int], analysis_width: int = 320) -> dict[int, dict]:
     """Blur, exposure and global motion for the requested frames (single sequential decode)."""
     wanted = set(frame_indices)
@@ -114,7 +117,9 @@ def image_signals(video: Path, frame_indices: list[int], analysis_width: int = 3
             if index in wanted:
                 motion = None
                 if previous is not None:
-                    if np.ptp(previous) > 0 and np.ptp(gray) > 0:
+                    # Phase correlation needs texture: near-flat frames (codec noise only)
+                    # return arbitrary shifts, so they give no motion evidence.
+                    if previous.std() >= MIN_TEXTURE_STD and gray.std() >= MIN_TEXTURE_STD:
                         (dx, dy), _ = cv2.phaseCorrelate(previous.astype(np.float32), gray.astype(np.float32))
                         motion = float(np.hypot(dx, dy))/analysis_width
                 out[index] = {**{k: v for k, v in stats.items() if k != "mean_luma"},

@@ -1,6 +1,7 @@
 """Regression tests for browser writes, run deletion, and stale-worker recovery."""
 from __future__ import annotations
 
+import inspect
 import hashlib
 import json
 import os
@@ -147,11 +148,16 @@ class P1FixTests(TestCase):
         host = socket.gethostname()
         process = subprocess.Popen([sys.executable, "-c", "pass"])
         process.wait(timeout=10)
-        with patch.object(jobs.os, "kill", side_effect=AssertionError("os.kill must not be called")):
+        # os.kill(pid, 0) terminates the process on Windows, so jobs must never call it directly
+        # and must delegate to psutil.pid_exists. (psutil itself uses os.kill(pid, 0) on POSIX,
+        # where that is a harmless existence probe, so patching os.kill globally is not portable.)
+        self.assertNotIn("os.kill(", inspect.getsource(jobs))
+        with patch.object(jobs.psutil, "pid_exists", wraps=jobs.psutil.pid_exists) as pid_exists:
             self.assertFalse(jobs._alive(f"{host}:{process.pid}"))
             self.assertTrue(jobs._alive(f"{host}:{os.getpid()}"))
             self.assertTrue(jobs._alive("remote-host:1"))
             self.assertTrue(jobs._alive("unknown"))
+        self.assertEqual(pid_exists.call_count, 2)  # only for this host's numeric pids
 
     def test_recovery_does_not_overwrite_concurrent_cancellation(self):
         run = Run.objects.create(video=self.video, status=Run.Status.RUNNING, worker_id="dead:1")

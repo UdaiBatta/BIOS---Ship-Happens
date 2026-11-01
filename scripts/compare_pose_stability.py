@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from egohand_twin.smoothing import WORLD_FINGER_BONES
+from motioniq.smoothing import WORLD_FINGER_BONES
 
 
 def load(run: Path) -> tuple[list, dict]:

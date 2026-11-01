@@ -1,8 +1,8 @@
 """Physical track identity is independent of the detector that produced the observation."""
 import numpy as np
 
-from egohand_twin.model import Detection
-from egohand_twin.tracking import IdentityTracker
+from motioniq.model import Detection
+from motioniq.tracking import IdentityTracker
 
 PRESET = dict(box_link=True, side_weights={"center_crop_rescue": 0.}, side_hysteresis=.15)
 

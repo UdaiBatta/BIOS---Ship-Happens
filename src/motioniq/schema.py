@@ -1,6 +1,6 @@
-"""Validate per-frame JSONL records against egohand_twin_frame.schema.json (JSON Schema 2020-12).
+"""Validate per-frame JSONL records against motioniq_frame.schema.json (JSON Schema 2020-12).
 
-The schema file is shipped unchanged inside the package (``egohand_twin/schemas``).
+The schema file is shipped unchanged inside the package (``motioniq/schemas``).
 Validation is offline and reports error counts grouped by location and message,
 plus the first few failing frame indices, so a broken field is traceable to frames.
 """
@@ -14,14 +14,14 @@ import re
 
 from jsonschema import Draft202012Validator
 
-SCHEMA_NAME = "egohand_twin_frame.schema.json"
+SCHEMA_NAME = "motioniq_frame.schema.json"
 
 
 def load_schema(path: Path | None = None) -> dict:
     if path is not None:
         schema = json.loads(Path(path).read_text())
     else:
-        schema = json.loads(resources.files("egohand_twin").joinpath("schemas", SCHEMA_NAME).read_text())
+        schema = json.loads(resources.files("motioniq").joinpath("schemas", SCHEMA_NAME).read_text())
     Draft202012Validator.check_schema(schema)
     return schema
 

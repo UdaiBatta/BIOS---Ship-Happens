@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from egohand_twin.governance import load, not_recorded, retention_report, template, validate
-from egohand_twin.pipeline import process
+from motioniq.governance import load, not_recorded, retention_report, template, validate
+from motioniq.pipeline import process
 
 TODAY = date(2026, 10, 31)
 

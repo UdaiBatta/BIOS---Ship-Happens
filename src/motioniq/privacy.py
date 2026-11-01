@@ -82,7 +82,7 @@ def scan_privacy(video: Path, run: Path, model: Path, every_s: float = 1., min_s
                                   "source": "mediapipe_blazeface_short_range", "review_status": "unreviewed"})
         finally:
             cap.release()
-    return {"schema": "egohand_privacy_flags/0.1", "video_sha256": manifest.get("source", {}).get("sha256"),
+    return {"schema": "motioniq_privacy_flags/0.1", "video_sha256": manifest.get("source", {}).get("sha256"),
             "frames_checked": len(wanted), "every_s": every_s, "min_score": min_score, "flags": flags,
             "categories_checked": ["face_candidate"],
             "not_checked": ["screens", "documents", "badges", "other identifying details"],

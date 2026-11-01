@@ -22,7 +22,7 @@ def make_cached_run(tmp_path, *, source_hash=None, preset="accurate", stride=1, 
     if complete:
         (run / "COMPLETE").write_text("complete\n")
     (run / "manifest.json").write_text(json.dumps({
-        "source": {"sha256": source_hash, "fps": 30},
+        "source": {"sha256": source_hash, "fps": 30, "cfr": True},
         "parameters": {"preset": preset, "stride": stride},
     }))
     records = [
@@ -186,3 +186,14 @@ def test_readme_uses_neutral_ids_and_separates_inference_from_render(tmp_path):
     assert "does not claim the preset is best" in text
     assert "2.00" in text and "3.00" in text
     assert "source.mp4" not in text
+
+
+@pytest.mark.parametrize("cfr", [False, None])
+def test_fixed_fps_renderer_rejects_variable_or_unknown_source_timing(tmp_path, cfr):
+    video, clip, run = make_cached_run(tmp_path)
+    path = run / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["source"]["cfr"] = cfr
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="constant frame rate"):
+        deliverables.prepare_task(video, clip, tmp_path / "runs", "accurate")

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from egohand_twin.model import Detection, map_crop_detection
-from egohand_twin.tracking import IdentityTracker, OneEuro
+from motioniq.model import Detection, map_crop_detection
+from motioniq.tracking import IdentityTracker, OneEuro
 
 
 def detection(x=.3, y=.5, side="Left", score=.95):
@@ -136,7 +136,7 @@ def test_missing_reason_border_touch_without_motion():
 
 def test_presets_fill_only_unset_options():
     import argparse
-    from egohand_twin.cli import apply_preset
+    from motioniq.cli import apply_preset
     base = dict(detection_threshold=None, presence_threshold=None, tracking_threshold=None, rescue_crop=None)
     recall = apply_preset(argparse.Namespace(preset="recall", **base))
     assert (recall.detection_threshold, recall.rescue_crop) == (.3, True)
@@ -150,7 +150,7 @@ def test_presets_fill_only_unset_options():
 
 def _box_hand(x, y=.5, size=.1, side="Left"):
     import numpy as np
-    from egohand_twin.model import Detection
+    from motioniq.model import Detection
     image = np.zeros((21, 3))
     image[:, 0] = x + np.linspace(0, size, 21)
     image[:, 1] = y + np.linspace(0, size, 21)
@@ -158,7 +158,7 @@ def _box_hand(x, y=.5, size=.1, side="Left"):
 
 
 def test_box_link_hides_a_predicted_ghost_on_an_observed_hand():
-    from egohand_twin.tracking import IdentityTracker
+    from motioniq.tracking import IdentityTracker
     for box_link, expected in ((False, "predicted"), (True, "lost")):
         t = IdentityTracker(box_link=box_link)
         first = t.update([_box_hand(.20), _box_hand(.24)], 0.)   # two overlapping tracks
@@ -171,7 +171,7 @@ def test_box_link_hides_a_predicted_ghost_on_an_observed_hand():
 
 def test_box_link_keeps_one_identity_when_the_wrist_jumps_inside_the_same_hand_box():
     import numpy as np
-    from egohand_twin.tracking import IdentityTracker
+    from motioniq.tracking import IdentityTracker
     t = IdentityTracker(box_link=True)
     tid = t.update([_box_hand(.30, size=.3)], 0.)[0]["track_id"]
     moved = _box_hand(.30, size=.3)

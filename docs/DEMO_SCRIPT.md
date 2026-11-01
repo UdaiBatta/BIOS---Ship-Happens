@@ -8,7 +8,7 @@ Run `scripts/run_local.ps1` on Windows or `scripts/run_local.sh` on macOS/Linux.
 
 Start the demonstration in **Hand posture**, the default. It shows wrist-centered hand-relative geometry even when the assumed-lens camera estimate is rejected. **Camera space · experimental** is optional; its fallback is labeled and does not invent camera placement. **Mesh / Mesh + skeleton** work in posture and camera views. Explain that Side score means left/right classifier support, while landmark confidence is uncalibrated.
 
-If FFmpeg is outside PATH, set `EGOHAND_FFMPEG_DIR` to its `bin` directory before launching. Keep the laptop on AC power. A prepared run must be selected before presenting; do not rely on live processing. The final demo-run identifier will be kept in ignored `deliverables/demo-run.txt` once preparation passes.
+If FFmpeg is outside PATH, set `MOTIONIQ_FFMPEG_DIR` to its `bin` directory before launching. Keep the laptop on AC power. A prepared run must be selected before presenting; do not rely on live processing. The final demo-run identifier will be kept in ignored `deliverables/demo-run.txt` once preparation passes.
 
 Run `powershell -File scripts/preflight.ps1 -RunId <prepared-run-uuid>` or `bash scripts/preflight.sh --run <prepared-run-uuid>`. A passing check does not replace testing playback and the private backup recording.
 
@@ -16,7 +16,7 @@ Open `http://127.0.0.1:8000/?run=<prepared-run-uuid>` to load the prepared run d
 
 ## 2. Six-slide outline
 
-Use `slides/EgoHand_Twin.pptx` and its PDF copy. Both remain drafts until accuracy inputs, the final speed measurement and a teammate's readthrough are complete.
+Use `slides/MOTIONIQ.pptx` and its PDF copy. Both remain drafts until accuracy inputs, the final speed measurement and a teammate's readthrough are complete.
 
 1. The data engineer's problem: usable, uncertain and missing hand motion.
 2. Pipeline: detection presets, explicit tracking states, offline smoothing, estimated 3D, review and exports.

@@ -73,6 +73,6 @@ Full tables and the variants that were rejected: [HANDEDNESS_ROOT_CAUSE](HANDEDN
 ## Reproduce
 
 ```sh
-uv run egohand process data/private/mytronlabs-000060-016.mp4 --out runs/X --duration 30 --preset recall --workers 2 --no-video
+uv run motioniq process data/private/mytronlabs-000060-016.mp4 --out runs/X --duration 30 --preset recall --workers 2 --no-video
 uv run python scripts/compare_baseline.py data/private/labels_v2/labels_v2_provisional.json dev recall=runs/X hybrid=runs/Y
 ```

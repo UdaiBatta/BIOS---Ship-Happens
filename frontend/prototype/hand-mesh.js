@@ -1,4 +1,4 @@
-/* EgoHand Twin: an anatomically shaped low-poly hand surface generated from 21 observed 3D joints.
+/* MOTIONIQ: an anatomically shaped low-poly hand surface generated from 21 observed 3D joints.
  *
  * A procedural skin for camera-space joints or illustrative hand-relative posture:
  *  - finger segments: 8-sided tubes that taper towards the tip, narrow slightly between joints
@@ -17,7 +17,7 @@
  * change per frame. Every part is a closed surface wound outward (checked by tests for left and right
  * hands), so the viewer's back-face culling and Lambert shading work.
  * Budget: 1,872 triangles and 970 vertices per hand.
- * Works in the browser (window.EgoHandMesh) and in Node (module.exports) for tests.
+ * Works in the browser (window.MotionIQMesh) and in Node (module.exports) for tests.
  */
 (function (root) {
   'use strict';
@@ -202,5 +202,5 @@
 
   const api = { build, forHands, partVolumes, calibrate, boneLengths, profile, FACES, VERTEX_COUNT, BONES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.EgoHandMesh = api;
+  else root.MotionIQMesh = api;
 })(typeof window !== 'undefined' ? window : globalThis);

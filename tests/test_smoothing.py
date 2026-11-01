@@ -1,7 +1,7 @@
 """Offline smoothing: no lag on fast motion, less jitter when still, per track, raw untouched."""
 import numpy as np
 
-from egohand_twin.smoothing import WORLD_FINGER_BONES, rts_wrist, smooth_samples
+from motioniq.smoothing import WORLD_FINGER_BONES, rts_wrist, smooth_samples
 
 
 def _hand(track, x, y, observed=True):

@@ -1,4 +1,4 @@
-"""Fast, cached access to run outputs written by egohand_twin.
+"""Fast, cached access to run outputs written by motioniq.
 
 Latency design:
 - ``frames_index.npz`` (built once when a run completes) stores the byte offset,
@@ -18,7 +18,7 @@ import csv
 import json
 from pathlib import Path
 
-from egohand_twin.ffmpeg import require_tool
+from motioniq.ffmpeg import require_tool
 import subprocess
 import threading
 import uuid
@@ -26,6 +26,7 @@ import uuid
 from django.conf import settings
 from django.core.cache import cache
 import numpy as np
+
 
 INDEX_NAME = "frames_index.npz"
 TRACKS_NAME = "tracks.json"
@@ -50,7 +51,7 @@ def allowed_media_path(path: str | Path) -> Path:
             if not resolved.is_file():
                 raise FileNotFoundError(f"Not a file: {resolved.name}")
             return resolved
-    raise PermissionError("Path is outside the allowed media folders (EGOHAND_MEDIA_ROOTS)")
+    raise PermissionError("Path is outside the allowed media folders (MOTIONIQ_MEDIA_ROOTS)")
 
 
 def display_name(path: Path) -> str:
@@ -64,7 +65,7 @@ def display_name(path: Path) -> str:
 
 
 def assert_video_unchanged(video) -> None:
-    from egohand_twin.model import sha256
+    from motioniq.model import sha256
     path = Path(video.path)
     fingerprint = _stamp(path)
     key = f"source-sha:{path}"
@@ -263,7 +264,7 @@ def frame_jpeg(video_path: Path, video_sha: str, frame_index: int, pts_s: float,
 
 def video_timestamps(video) -> np.ndarray:
     """Per-frame presentation timestamps (relative to the first), probed once per video and cached."""
-    from egohand_twin.pipeline import probe
+    from motioniq.pipeline import probe
     path = settings.DATA_DIR/"timestamps"/f"{video.sha256}.npy"
     key = f"ts:{video.sha256}"
     value = cache.get(key)

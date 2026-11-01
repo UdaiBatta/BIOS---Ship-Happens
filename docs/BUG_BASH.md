@@ -4,7 +4,7 @@ Verified on the local Windows laptop on 1 Nov 2026, branch `udai-s1`. Footage, r
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Pipeline suite | PASS | `uv run pytest -q`: 197 passed, 1 skipped. |
+| Pipeline suite | PASS | `uv run pytest -q`: 202 passed, 1 skipped. |
 | Backend suite | PASS | From `backend`, `uv run python manage.py test`: 42 of 42 passed; no system-check issues. Expected error-path logs are part of the tests. |
 | All offered presets | PASS | Baseline, recall, accurate and hybrid each completed a five-second registered-video run with no app console/page errors or failed requests in the successful flow. |
 | Longer accurate run | PASS after fix | Unused full-resolution frame retention was removed from crop-rescue reverse processing. Corrected thirty-second processing completes and loads its selected frames. The earlier native failure remains a failed warm-up, not a speed result. |

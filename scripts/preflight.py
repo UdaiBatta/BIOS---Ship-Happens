@@ -1,4 +1,4 @@
-"""Local readiness checks for a prepared EgoHand run and benchmark restart."""
+"""Local readiness checks for a prepared MOTIONIQ run and benchmark restart."""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +13,7 @@ import uuid
 
 import psutil
 
-from egohand_twin.ffmpeg import find_tool
+from motioniq.ffmpeg import find_tool
 
 
 API_ROOT = "http://127.0.0.1:8000/api"
@@ -42,7 +42,7 @@ def check_worker() -> tuple[bool, str]:
                 continue
             lowered = [str(arg).lower() for arg in args]
             if not (any(Path(arg).name.lower() == "manage.py" for arg in lowered)
-                    and any("egohand_worker" in arg for arg in lowered)):
+                    and any("motioniq_worker" in arg for arg in lowered)):
                 continue
             try:
                 cwd = Path(process.cwd()).resolve()
@@ -77,12 +77,12 @@ def check_power() -> tuple[bool, str]:
 
 def run_checks(run_id: str) -> list[tuple[str, bool, str]]:
     root = Path(__file__).resolve().parent.parent
-    token = os.environ.get("EGOHAND_API_TOKEN", "")
+    token = os.environ.get("MOTIONIQ_API_TOKEN", "")
     checks: list[tuple[str, bool, str]] = []
 
     for name in ("ffmpeg", "ffprobe"):
         found = find_tool(name) is not None
-        checks.append((name, found, "available" if found else "not found (PATH or EGOHAND_FFMPEG_DIR)"))
+        checks.append((name, found, "available" if found else "not found (PATH or MOTIONIQ_FFMPEG_DIR)"))
 
     try:
         health = request_json("health", token)
@@ -130,7 +130,7 @@ def run_checks(run_id: str) -> list[tuple[str, bool, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Check local readiness for a prepared EgoHand run.")
+    parser = argparse.ArgumentParser(description="Check local readiness for a prepared MOTIONIQ run.")
     parser.add_argument("--run", required=True, help="UUID of a completed run prepared for this benchmark")
     args = parser.parse_args(argv)
 

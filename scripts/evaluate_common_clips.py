@@ -273,7 +273,7 @@ def write_report(path: Path, summary: dict) -> None:
 
 
 def probe_duration(clip: Path) -> float:
-    from egohand_twin.ffmpeg import require_tool
+    from motioniq.ffmpeg import require_tool
     command = [require_tool("ffprobe"), "-v", "error", "-show_entries", "format=duration",
                "-of", "default=noprint_wrappers=1:nokey=1", str(clip)]
     result = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -307,7 +307,7 @@ def _write_failure_logs(run: Path, stdout: str, stderr: str) -> None:
 
 
 def measure_camera_lift(run: Path) -> dict:
-    command = [sys.executable, "-m", "egohand_twin.cli", "lift", str(run), "--hfov", "150"]
+    command = [sys.executable, "-m", "motioniq.cli", "lift", str(run), "--hfov", "150"]
     try:
         done = subprocess.run(command, capture_output=True, text=True)
     except OSError as exc:
@@ -404,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             row["status"] = "processing"
             persist()
-            command = [sys.executable, "-m", "egohand_twin.cli", "process", str(clip), "--out", str(run),
+            command = [sys.executable, "-m", "motioniq.cli", "process", str(clip), "--out", str(run),
                        "--preset", preset, "--start-seconds", str(interval["start_seconds"]),
                        "--workers", str(args.workers), "--no-video"]
             if interval["duration_seconds"] < source_duration:

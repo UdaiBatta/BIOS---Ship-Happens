@@ -2,18 +2,18 @@
 
 ## Project details
 
-- **Project:** EgoHand Twin
+- **Project:** MOTIONIQ
 - **Category:** PS4 — 3D Hand Motion
 - **Repository:** https://github.com/UdaiBatta/BIOS---Ship-Happens
 - **Purpose:** turn head-mounted factory footage into inspectable hand-relative 3D posture estimates and timestamped motion data.
 
 ## Short project description (current)
 
-EgoHand Twin processes head-mounted video locally and presents hand landmarks, short-term tracks, uncertainty states and review tools. The browser viewer supports synchronized video and landmark inspection, a 3D view with orbit, zoom and reset, a timeline, frame details, heuristic event review and exports. A generated hand surface is available for backend runs with camera-space landmarks; it is bone-length calibrated, but it is not a fitted MANO/WiLoR model. Motion events are inferred candidates with unvalidated thresholds. Face-only privacy flags are experimental review assistance. The current session's common accuracy has not been measured because the local `labels_v2` inputs are missing. Earlier single-clip measurements remain provisional historical results in [RESULTS_V2](RESULTS_V2.md). The camera-space lift assumes a lens model; depth is unvalidated. The system does not provide robot export or factory coordinates.
+MOTIONIQ processes head-mounted video locally and presents hand landmarks, short-term tracks, uncertainty states and review tools. The browser viewer supports synchronized video and landmark inspection, a 3D view with orbit, zoom and reset, a timeline, frame details, heuristic event review and exports. A generated hand surface is available for backend runs with camera-space landmarks; it is bone-length calibrated, but it is not a fitted MANO/WiLoR model. Motion events are inferred candidates with unvalidated thresholds. Face-only privacy flags are experimental review assistance. The current session's common accuracy has not been measured because the local `labels_v2` inputs are missing. Earlier single-clip measurements remain provisional historical results in [RESULTS_V2](RESULTS_V2.md). The camera-space lift assumes a lens model; depth is unvalidated. The system does not provide robot export or factory coordinates.
 
 ## Short project description (first milestone, historical)
 
-EgoHand Twin is an offline computer-vision pipeline for inspecting hand motion in factory POV videos. It uses MediaPipe to estimate 21 image landmarks and 21 hand-relative 3D landmarks per detected hand, associates observations into short-term tracks, and exposes observed, predicted, lost and reacquired states. A synchronized viewer places the original footage beside 3D hand skeletons and tracking events. Raw and smoothed landmarks export to JSONL, CSV and NPZ for downstream analysis. The system runs on laptop CPU hardware and includes an optional, experimental crop-rescue detector for missed hands. The current implementation reconstructs hand-relative skeleton posture; it does not yet produce hand meshes or validated absolute factory coordinates.
+MOTIONIQ is an offline computer-vision pipeline for inspecting hand motion in factory POV videos. It uses MediaPipe to estimate 21 image landmarks and 21 hand-relative 3D landmarks per detected hand, associates observations into short-term tracks, and exposes observed, predicted, lost and reacquired states. A synchronized viewer places the original footage beside 3D hand skeletons and tracking events. Raw and smoothed landmarks export to JSONL, CSV and NPZ for downstream analysis. The system runs on laptop CPU hardware and includes an optional, experimental crop-rescue detector for missed hands. The current implementation reconstructs hand-relative skeleton posture; it does not yet produce hand meshes or validated absolute factory coordinates.
 
 ## What is implemented
 
@@ -62,11 +62,11 @@ The checked entries below record completed historical work; their measurements r
 - [x] Verified fast timestamp probe and per-stage timing.
 - [ ] Process at least one clip from each other recording family (blocked here: Drive downloads not reachable from this environment).
 - [ ] Ask the organizers the drafted questions in PRODUCT_BRIEF.md (lens intrinsics, QA framing, sharing of processed outputs).
-- [ ] When the organizers answer, set `consent_status` and `retention_until` in `data/private/governance_mytronlabs.json` (currently `unknown` / null) and reprocess the demo runs with `--governance`. Only runs made with `--governance` (e.g. `runs/final_demo`) record governance; `egohand retention-report runs` lists the rest as `governance_not_recorded`.
+- [ ] When the organizers answer, set `consent_status` and `retention_until` in `data/private/governance_mytronlabs.json` (currently `unknown` / null) and reprocess the demo runs with `--governance`. Only runs made with `--governance` (e.g. `runs/final_demo`) record governance; `motioniq retention-report runs` lists the rest as `governance_not_recorded`.
 - [ ] Run the review-time pilot (protocol in DEMO_AND_QA.md) or present the benefit as untested.
 - [ ] Confirm which local completed run is suitable for the demo; otherwise use the viewer preview and demonstrate processing explicitly.
 - [ ] Record the five-minute demo from a locally approved run.
-- [ ] A teammate reviews the labels: `egohand label-review` → fill `data/private/label_review/review.csv` → `label-review-apply` → re-run the evaluation commands in RESULTS_V2 §8.
+- [ ] A teammate reviews the labels: `motioniq label-review` → fill `data/private/label_review/review.csv` → `label-review-apply` → re-run the evaluation commands in RESULTS_V2 §8.
 - [ ] Before any public copy: remove docs that name clips or describe the footage (RESULTS_V2, AGENT_CONTINUATION_PROMPT, REFERENCE_ARTIFACTS); keep the repository private while release assets are attached.
 
 Historical checklist:

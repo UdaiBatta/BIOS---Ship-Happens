@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 from types import SimpleNamespace
 
-from egohand_twin.lift import EquidistantFisheye, lift_run, solve_hand
+from motioniq.lift import EquidistantFisheye, lift_run, solve_hand
 
 
 @pytest.mark.parametrize("hfovs,existing", [([120., 150.], "json"), ([120., 150.], "npz"),
                                             ([120.1, 120.4], None)])
 def test_lift_sweep_rejects_conflicts_before_writing_any_pair(tmp_path, hfovs, existing):
-    from egohand_twin.cli import lift_command
+    from motioniq.cli import lift_command
 
     (tmp_path/"COMPLETE").touch()
     (tmp_path/"manifest.json").write_text(json.dumps({"source": {"width": 160, "height": 90}}))

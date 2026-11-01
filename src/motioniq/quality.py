@@ -432,7 +432,7 @@ def evaluate_quality(windows: list[dict], labels: Path, evaluation: dict, split:
             "k": count("missed", ["insufficient_evidence"]),
             "n": count("missed", ["insufficient_evidence"]) + count("no_visible_hand", ["insufficient_evidence"])},
         "note": ("Frame-level comparison on sparse labels; a window is judged by the labeled frames inside it. "
-                 "'missed' uses the same wrist-matching protocol as egohand evaluate."),
+                 "'missed' uses the same wrist-matching protocol as motioniq evaluate."),
     }
 
 

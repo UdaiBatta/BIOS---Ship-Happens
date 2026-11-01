@@ -1,4 +1,4 @@
-"""Build a six-slide editable EgoHand Twin draft deck and matching PDF locally."""
+"""Build a six-slide editable MOTIONIQ draft deck and matching PDF locally."""
 from __future__ import annotations
 
 import json
@@ -21,8 +21,8 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
 ROOT = Path(__file__).resolve().parents[1]
-PPTX_PATH = ROOT / "slides" / "EgoHand_Twin.pptx"
-PDF_PATH = ROOT / "slides" / "EgoHand_Twin.pdf"
+PPTX_PATH = ROOT / "slides" / "MOTIONIQ.pptx"
+PDF_PATH = ROOT / "slides" / "MOTIONIQ.pdf"
 BENCHMARK_PATH = ROOT / "runs" / "laptop-benchmark" / "final.json"
 
 SW, SH = 13.333333, 7.5
@@ -166,16 +166,16 @@ def build_pptx(performance):
     prs = Presentation()
     prs.slide_width = Inches(SW)
     prs.slide_height = Inches(SH)
-    prs.core_properties.author = "EgoHand Twin team"
-    prs.core_properties.creator = "EgoHand Twin team"
-    prs.core_properties.last_modified_by = "EgoHand Twin team"
-    prs.core_properties.title = "EgoHand Twin"
+    prs.core_properties.author = "MOTIONIQ team"
+    prs.core_properties.creator = "MOTIONIQ team"
+    prs.core_properties.last_modified_by = "MOTIONIQ team"
+    prs.core_properties.title = "MOTIONIQ"
     prs.core_properties.subject = "Draft for team review"
     blank = prs.slide_layouts[6]
 
     # 1. Cover
     s = prs.slides.add_slide(blank); set_slide_bg(s)
-    add_text(s, "EgoHand Twin", .82, 1.12, 11.4, .85, 46, INK, bold=True)
+    add_text(s, "MOTIONIQ", .82, 1.12, 11.4, .85, 46, INK, bold=True)
     add_text(s, "Factory POV video holds useful hand motion. Teams need trustworthy cues to find usable seconds.",
              .85, 2.35, 10.5, 1.15, 25, MUTED)
     add_text(s, "WEARER LEFT", .88, 5.25, 3.1, .35, 16, ORANGE, bold=True)
@@ -350,10 +350,10 @@ def build_pdf(performance, output_path=PDF_PATH):
     pdf_font_setup()
     W, H = SW*72, SH*72
     c = canvas.Canvas(str(output_path), pagesize=(W, H), pageCompression=1)
-    c.setTitle("EgoHand Twin")
-    c.setAuthor("EgoHand Twin team")
-    c.setCreator("EgoHand Twin team")
-    c._doc.info.producer = "EgoHand Twin team"
+    c.setTitle("MOTIONIQ")
+    c.setAuthor("MOTIONIQ team")
+    c.setCreator("MOTIONIQ team")
+    c._doc.info.producer = "MOTIONIQ team"
 
     def start_slide(heading):
         c.setFillColor(pc(PAPER)); c.rect(0, 0, W, H, fill=1, stroke=0)
@@ -361,7 +361,7 @@ def build_pdf(performance, output_path=PDF_PATH):
 
     # 1
     c.setFillColor(pc(PAPER)); c.rect(0, 0, W, H, fill=1, stroke=0)
-    ptext(c, "EgoHand Twin", 59, 78, 820, 46, INK, True)
+    ptext(c, "MOTIONIQ", 59, 78, 820, 46, INK, True)
     ptext(c, "Factory POV video holds useful hand motion. Teams need trustworthy cues to find usable seconds.",
           61, 169, 755, 25, MUTED, leading=33)
     ptext(c, "WEARER LEFT", 63, 379, 240, 16, ORANGE, True)
@@ -462,7 +462,7 @@ def main():
     performance = load_performance()
     PPTX_PATH.parent.mkdir(parents=True, exist_ok=True)
     prs = build_pptx(performance)
-    with tempfile.TemporaryDirectory(prefix="EgoHand_Twin-", dir=PPTX_PATH.parent) as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="MOTIONIQ-", dir=PPTX_PATH.parent) as temp_dir:
         pptx_temp = Path(temp_dir) / "draft.pptx"
         pdf_temp = Path(temp_dir) / "draft.pdf"
         prs.save(pptx_temp)

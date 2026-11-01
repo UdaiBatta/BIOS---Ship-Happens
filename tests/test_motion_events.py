@@ -3,7 +3,7 @@ import json
 
 import numpy as np
 
-from egohand_twin.motion_events import derive_events
+from motioniq.motion_events import derive_events
 
 
 def _write_run(tmp_path, frames):

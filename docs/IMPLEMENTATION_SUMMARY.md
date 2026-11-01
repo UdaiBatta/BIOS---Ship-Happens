@@ -15,7 +15,7 @@ The table below preserves the 31 Oct–1 Nov sprint record. Its numerical result
 | 5 | Still-hand discovery | Tried, no gain | Periodic discovery with 3-check confirmation (`--discover-every`, off): dev recall unchanged 45/72, the still bare hand unchanged 17/30 |
 | 6 | Same-side tracks | Done | 2+ records with one side are mostly lost leftovers (131 lost+observed frames). The weaker of two observed same-side hands is shown unknown: holdout pairs 31 → 3, wrong sides unchanged. Lost tracks listed as a note, not as hands |
 | 7 | Honest depth | Done | Approximate camera-space under an assumed lens; see [EXPERIMENTAL_3D_STATUS](EXPERIMENTAL_3D_STATUS.md) |
-| 8 | Other video families | Not measured | Label about 50 frames per family with `egohand annotation-set`, then `scripts/compare_baseline.py` |
+| 8 | Other video families | Not measured | Label about 50 frames per family with `motioniq annotation-set`, then `scripts/compare_baseline.py` |
 | P1 | Timeline redesign | Done | Primary lanes + Unknown-side lane, events strip, zoom/pan/scrub, failure and reacquisition jumps, inspection panel, collapsed diagnostics. [TIMELINE_REDESIGN](TIMELINE_REDESIGN.md) |
 | P4 | Industrial UX | Partly done | Workspaces, resizable split, 3D controls, states. Follow-hand camera, video search and full restyle were not part of that sprint. [INDUSTRIAL_UX_DESIGN](INDUSTRIAL_UX_DESIGN.md) |
 | P5 | Evidence-linked events | Done (thresholds unvalidated) | Entry, exit, long gap, candidate hold and movement; evidence frames; Confirm/Reject stored and restored. [MOTION_EVENT_SCHEMA](MOTION_EVENT_SCHEMA.md) |

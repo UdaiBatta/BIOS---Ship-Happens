@@ -25,7 +25,7 @@ import numpy as np
 HOLD_SPEED, HOLD_S = .08, 1.
 MOVE_SPEED, MOVE_S = .3, .3
 GAP_S = 1.
-SCHEMA = "egohand_motion_events/0.1"
+SCHEMA = "motioniq_motion_events/0.1"
 
 
 def _speed_runs(samples, test, min_s, window=5):

@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from egohand_twin.conditions import apply_conditions, condition_at, template, validate_conditions
-from egohand_twin.evaluation import evaluate
-from egohand_twin.schema import validate_jsonl
+from motioniq.conditions import apply_conditions, condition_at, template, validate_conditions
+from motioniq.evaluation import evaluate
+from motioniq.schema import validate_jsonl
 
 
 def interval(start, end, **over):

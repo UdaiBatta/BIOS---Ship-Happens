@@ -198,7 +198,7 @@ def fetch_command(a):
 
 def build_parser() -> argparse.ArgumentParser:
     """The single source of truth for command options (also used by the Django job worker)."""
-    parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
+    parser = argparse.ArgumentParser(description="MOTIONIQ: offline 3D hand landmark reconstruction")
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("doctor", help="Inspect this machine and installed dependencies")
     p.set_defaults(func=doctor)
@@ -257,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "Explicit flags override.")
     p.add_argument("--hand-detector", action="store_true", default=None,
                    help="Add an RTMDet hand detector for hands MediaPipe misses (part of --preset hybrid; "
-                        "needs: egohand fetch-model --rtm)")
+                        "needs: motioniq fetch-model --rtm)")
     p.add_argument("--rtm-models", default="models/rtm", help="Folder with the RTM hand models")
     p.add_argument("--discover-every", type=int, default=None,
                    help="EXPERIMENTAL (hybrid): every N frames look for never-tracked hands; accepted after 3 "
@@ -277,8 +277,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("video")
     p.add_argument("run")
     p.add_argument("--out", required=True, help="New .rrd output filename")
-    p.add_argument("--lift", help="Optional lift_*.npz from 'egohand lift' for an experimental camera-space view")
-    p.add_argument("--quality", help="Optional quality directory from 'egohand quality' for the review timeline")
+    p.add_argument("--lift", help="Optional lift_*.npz from 'motioniq lift' for an experimental camera-space view")
+    p.add_argument("--quality", help="Optional quality directory from 'motioniq quality' for the review timeline")
     p.add_argument("--steps", help="Optional steps.json sidecar (human-authored step markers)")
     p.set_defaults(func=lambda a: rebuild_replay(Path(a.video), Path(a.run), Path(a.out),
                                                  Path(a.lift) if a.lift else None,
@@ -300,11 +300,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("run")
     p.add_argument("--every", type=float, default=1., help="Seconds between checked frames")
     p.add_argument("--face-model", default="models/blaze_face_short_range.tflite")
-    p.set_defaults(func=lambda a: print(__import__("egohand_twin.privacy", fromlist=["x"]).write_privacy(
-        Path(a.video), Path(a.run), __import__("egohand_twin.privacy", fromlist=["x"]).fetch_face_model(Path(a.face_model)), a.every)))
+    p.set_defaults(func=lambda a: print(__import__("motioniq.privacy", fromlist=["x"]).write_privacy(
+        Path(a.video), Path(a.run), __import__("motioniq.privacy", fromlist=["x"]).fetch_face_model(Path(a.face_model)), a.every)))
     p = commands.add_parser("events", help="Inferred candidate motion events -> RUN/motion_events.json")
     p.add_argument("run")
-    p.set_defaults(func=lambda a: print(__import__("egohand_twin.motion_events", fromlist=["x"]).write_events(Path(a.run))))
+    p.set_defaults(func=lambda a: print(__import__("motioniq.motion_events", fromlist=["x"]).write_events(Path(a.run))))
     p = commands.add_parser("identity", help="Offline whole-track left/right vote -> RUN/identity.json")
     p.add_argument("run")
     p.add_argument("--margin", type=float, default=.15)
@@ -348,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("run")
     p.add_argument("steps")
     p.set_defaults(func=lambda a: print(json.dumps(load_steps(Path(a.steps), Path(a.run)), indent=2)))
-    p = commands.add_parser("validate", help="Validate a run's per-frame JSONL against egohand_twin_frame.schema.json")
+    p = commands.add_parser("validate", help="Validate a run's per-frame JSONL against motioniq_frame.schema.json")
     p.add_argument("run")
     p.add_argument("--file", default="landmarks.jsonl", help="JSONL file inside the run (e.g. landmarks.identity.jsonl)")
     p.set_defaults(func=validate_command)

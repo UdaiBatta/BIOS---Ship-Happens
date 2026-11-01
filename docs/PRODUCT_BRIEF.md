@@ -1,8 +1,8 @@
-# EgoHand Twin — product brief and status (PS4, revised 31 Oct 2026)
+# MOTIONIQ — product brief and status (PS4, revised 31 Oct 2026)
 
 ## Product
 
-**EgoHand Twin reconstructs hand motion from factory POV footage and helps data teams find useful, uncertain and problematic segments for further review.**
+**MOTIONIQ reconstructs hand motion from factory POV footage and helps data teams find useful, uncertain and problematic segments for further review.**
 
 ```text
 Video -> hand observations + hand-relative 3D -> task-specific quality signals
@@ -32,7 +32,7 @@ Primary user: a data engineer preparing factory demonstrations for hand-motion a
 - Reliability shown in the replay: per-track state lanes, side probability, inferred `missing_reason` (measured: often wrong at the image edge), units and coordinate frames in view titles.
 - Teach-back helpers: same-moment flat-vs-3D image (`compare`) and a `steps.json` sidecar with reviewer sign-off.
 - Governance and lens provenance in `manifest.json` (schema 0.4), validated before processing, plus a retention report that never deletes anything.
-- Per-frame output validates against `egohand_twin_frame.schema.json` (`egohand validate`).
+- Per-frame output validates against `motioniq_frame.schema.json` (`motioniq validate`).
 - Capture conditions and exclusions in a `conditions.json` sidecar, with evaluation sliced by condition.
 - Continuity metrics: fragments per labeled hand; predicted-run and bridged-gap statistics.
 - Frozen definitions in [DEFINITIONS.md](DEFINITIONS.md); deferred work in [TODO.md](TODO.md); refreshed build prompt in [BUILD_PROMPT.md](BUILD_PROMPT.md).
@@ -43,7 +43,7 @@ Primary user: a data engineer preparing factory demonstrations for hand-motion a
 - **Detection candidates:** thresholds 0.3 plus the downscaled center crop (the chosen candidate), full-resolution tiles, track-guided crops, anti-aliased crops. Measured on dev and holdout from **one clip and one recording family**.
 - **Quality thresholds:** set by inspecting the development interval; not validated on other clips.
 - **Offline whole-track side vote and aspect-correct tracker distance:** available as options, no clear benefit measured.
-- **Camera-space PnP lifting** under an **assumed** fisheye lens (`egohand lift`, separate replay view). Synthetic tests pass. On footage, depth changes by ±25% across plausible FOV assumptions and is **unvalidated**.
+- **Camera-space PnP lifting** under an **assumed** fisheye lens (`motioniq lift`, separate replay view). Synthetic tests pass. On footage, depth changes by ±25% across plausible FOV assumptions and is **unvalidated**.
 
 **C. Proposed, not implemented**
 - Bone-length calibration and 3D smoothing in camera space, meshes (WiLoR/HaMeR), robot/gripper export, SLAM or head-rotation stabilization.

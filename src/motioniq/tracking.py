@@ -90,7 +90,7 @@ def record(track: Track, state: str, age: float, detection=None, image=None, wor
         "detection_index": detection.index if detection else None,
         "detection_origin": detection.origin if detection else None,
         "detection_origin_detail": detection.origin_detail if detection else None,
-        # Offline anatomical identity is not known while processing; `egohand identity
+        # Offline anatomical identity is not known while processing; `motioniq identity
         # --write-jsonl` writes a separate file with track-level votes.
         "anatomical_side": "unknown",
         # No calibrated hand-level confidence exists; never copied from handedness_score.

@@ -217,7 +217,7 @@ def label_review_pack(video: Path, labels: Path, out: Path, tile_width: int = 96
         "fill corrected_* columns (normalized 0-1 coordinates; read them from the frame grid sheets).\n"
         "If a visible hand has NO circle, describe it in missing_hand_note on that frame's row.\n"
         "Rows without gt_id are frames labeled as having no hands: leave decision empty or write 'ok'.\n"
-        "Then run: egohand label-review-apply LABELS review.csv --reviewer INITIALS --out NEW_LABELS.json\n")
+        "Then run: motioniq label-review-apply LABELS review.csv --reviewer INITIALS --out NEW_LABELS.json\n")
     return {"frames": len(frames), "rows": rows, "sheets": (len(tiles)+3)//4, "out": str(out)}
 
 

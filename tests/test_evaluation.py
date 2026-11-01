@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from egohand_twin.evaluation import evaluate
+from motioniq.evaluation import evaluate
 
 
 def test_predicted_hands_do_not_inflate_recall(tmp_path):
@@ -129,7 +129,7 @@ def test_incomplete_frame_rejected(tmp_path):
 
 
 def test_offline_track_vote_reported_and_unknown_not_forced(tmp_path):
-    from egohand_twin.identity import write_identity
+    from motioniq.identity import write_identity
     frames = []
     for i in range(6):
         # Track 1: mostly Left with one flipped frame; track 2: ambiguous.
@@ -150,7 +150,7 @@ def test_offline_track_vote_reported_and_unknown_not_forced(tmp_path):
 
 
 def test_foreign_identity_votes_are_rejected(tmp_path):
-    from egohand_twin.identity import write_identity
+    from motioniq.identity import write_identity
     _v2_run(tmp_path, [{"frame_index": i, "timestamp_s": i/30,
                         "hands": [_hand(1, .2, .5, "Left") | {"handedness_score": .9}]}
                        for i in range(3)])
@@ -181,7 +181,7 @@ def test_missing_reason_claims_checked_against_undetected_labeled_hands(tmp_path
 
 
 def test_continuity_bridged_terminal_and_predicted_runs():
-    from egohand_twin.evaluation import continuity
+    from motioniq.evaluation import continuity
 
     def h(tid, state):
         return {"track_id": tid, "state": state, "observed": state in ("observed", "reacquired")}

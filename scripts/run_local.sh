@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command local setup and launch of EgoHand Twin (backend + worker + viewer).
+# One-command local setup and launch of MOTIONIQ (backend + worker + viewer).
 # Usage, from the repository root:   bash scripts/run_local.sh
 # Everything stays on this machine: the server binds to 127.0.0.1 only.
 set -euo pipefail
@@ -9,7 +9,8 @@ CLIP="data/private/mytronlabs-000060-016.mp4"
 RELEASE="ps4-baseline-handoff-20261031"
 REPO="UdaiBatta/BIOS---Ship-Happens"
 
-if [ -n "${EGOHAND_FFMPEG_DIR:-}" ]; then export PATH="$EGOHAND_FFMPEG_DIR:$PATH"; fi
+if [ -z "${MOTIONIQ_FFMPEG_DIR:-}" ] && [ -n "${EGOHAND_FFMPEG_DIR:-}" ]; then export MOTIONIQ_FFMPEG_DIR="$EGOHAND_FFMPEG_DIR"; fi
+if [ -n "${MOTIONIQ_FFMPEG_DIR:-}" ]; then export PATH="$MOTIONIQ_FFMPEG_DIR:$PATH"; fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1. $2"; exit 1; }; }
 need uv "Install: https://docs.astral.sh/uv/ (macOS: brew install uv)"
@@ -18,10 +19,10 @@ need ffprobe "Install FFmpeg (it provides ffprobe)"
 
 echo "==> Installing dependencies"
 uv sync --extra dev --extra viewer --extra backend --extra hybrid
-uv run egohand fetch-model >/dev/null
+uv run motioniq fetch-model >/dev/null
 uv run rerun analytics disable >/dev/null 2>&1 || true
-uv run egohand fetch-model --rtm >/dev/null 2>&1 || echo "    (optional RTM hand models not downloaded; the experimental hybrid preset stays hidden)"
-uv run egohand doctor | grep -E '"mediapipe_runtime"' || true
+uv run motioniq fetch-model --rtm >/dev/null 2>&1 || echo "    (optional RTM hand models not downloaded; the experimental hybrid preset stays hidden)"
+uv run motioniq doctor | grep -E '"mediapipe_runtime"' || true
 
 if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.webm" \) 2>/dev/null | grep -q .; then
   echo "==> $CLIP not found; downloading it from the private release (needs: gh auth login)"
@@ -34,9 +35,9 @@ if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" 
 fi
 
 # A server or worker left over from an earlier launch keeps running OLD code; stop it first.
-OLD=$(pgrep -f "manage.py (runserver 127.0.0.1:8000|egohand_worker)" || true)
+OLD=$(pgrep -f "manage.py (runserver 127.0.0.1:8000|motioniq_worker)" || true)
 if [ -n "$OLD" ]; then
-  echo "==> Stopping EgoHand server/worker process(es) from an earlier launch: $OLD"
+  echo "==> Stopping MOTIONIQ server/worker process(es) from an earlier launch: $OLD"
   kill $OLD 2>/dev/null || true
   sleep 2
 fi
@@ -47,10 +48,10 @@ uv run python manage.py migrate -v0
 TO_REGISTER=()
 [ -f "$ROOT/$CLIP" ] && TO_REGISTER+=("$ROOT/$CLIP")
 [ -d "$ROOT/media" ] && TO_REGISTER+=("$ROOT/media")
-uv run python manage.py egohand_register "${TO_REGISTER[@]}"
+uv run python manage.py motioniq_register "${TO_REGISTER[@]}"
 
 echo "==> Starting worker and server (Ctrl+C stops both)"
-uv run python manage.py egohand_worker --recover &
+uv run python manage.py motioniq_worker --recover &
 WORKER=$!
 trap 'kill $WORKER 2>/dev/null || true' EXIT INT TERM
 echo "    Open http://127.0.0.1:8000/  -> Backend row: pick the video, preset recall, start 0, length 30, Process"

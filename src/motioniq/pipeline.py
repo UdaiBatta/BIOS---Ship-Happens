@@ -145,7 +145,7 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
     if not source.is_file():
         raise FileNotFoundError(source)
     if not Path(args.model).is_file():
-        raise FileNotFoundError("Model missing. Run: egohand fetch-model")
+        raise FileNotFoundError("Model missing. Run: motioniq fetch-model")
     if out.exists() and any(out.iterdir()):
         raise ValueError("Output directory is nonempty; choose a new --out directory")
     # Fail before any decoding if the governance file is invalid or already past retention.
@@ -383,7 +383,7 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
         (out/"metrics.json").write_text(json.dumps(metrics, indent=2)+"\n")
         manifest = {
             "schema_version": "0.5",
-            "frame_record_schema": "egohand_twin_frame.schema.json (package egohand_twin/schemas)", "created_utc": datetime.now(timezone.utc).isoformat(),
+            "frame_record_schema": "motioniq_frame.schema.json (package motioniq/schemas)", "created_utc": datetime.now(timezone.utc).isoformat(),
             "source": {"name": source.name, "sha256": sha256(source),
                        "width": int(info["width"]), "height": int(info["height"]),
                        "fps": info["fps"], "cfr": info["cfr"], "total_frames": len(info["timestamps"]),

@@ -21,4 +21,4 @@ The numerical table below is historical. The current smoother also stabilizes 3D
 - **E, bone-length-constrained 2D smoothing.** 2D bone lengths change with foreshortening. Bone-length calibration is applied to the mesh instead ([HAND_MESH_ARCHITECTURE](HAND_MESH_ARCHITECTURE.md)).
 - **Savitzky–Golay and quaternion joint-angle smoothing.** Not tried for time reasons.
 
-**Implementation:** `src/egohand_twin/smoothing.py`, an offline pass before the exports are written. Raw values are never modified, and the viewer's Raw/Smoothed toggle still compares them.
+**Implementation:** `src/motioniq/smoothing.py`, an offline pass before the exports are written. Raw values are never modified, and the viewer's Raw/Smoothed toggle still compares them.

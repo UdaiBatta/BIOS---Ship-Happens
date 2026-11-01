@@ -3,10 +3,10 @@ import json
 import numpy as np
 import pytest
 
-from egohand_twin.identity import write_identity_jsonl
-from egohand_twin.model import Detection, map_crop_detection
-from egohand_twin.schema import load_schema, validate_jsonl
-from egohand_twin.tracking import IdentityTracker, baseline_records
+from motioniq.identity import write_identity_jsonl
+from motioniq.model import Detection, map_crop_detection
+from motioniq.schema import load_schema, validate_jsonl
+from motioniq.tracking import IdentityTracker, baseline_records
 from jsonschema import Draft202012Validator
 
 

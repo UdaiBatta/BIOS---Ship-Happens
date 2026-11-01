@@ -3,7 +3,7 @@
 Usage:  uv run python scripts/evaluate_identity.py LABELS.json RUN:SPLIT [RUN:SPLIT ...]
 
 - side correct: the tracker's shown side vs the labelled wearer side, on labelled hands that
-  an observed wrist matches (0.10 image diagonals, as in `egohand evaluate`);
+  an observed wrist matches (0.10 image diagonals, as in `motioniq evaluate`);
 - labelled flips: Left<->Right changes between consecutive labelled samples of one labelled
   hand, split into "inside one track" and "at a track change" (unknown -> decided is not a flip);
 - side changes within tracks: every Left<->Right change of a track's shown side over the whole

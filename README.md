@@ -1,13 +1,13 @@
-# EgoHand Twin — BIOS Ship Happens (PS4: 3D hand motion)
+# MOTIONIQ — BIOS Ship Happens (PS4: 3D hand motion)
 
-EgoHand Twin reconstructs hand motion from head-mounted factory video, offline on a CPU, and helps a data team find which seconds are **usable, uncertain or missing**. Every number traces back to source frames.
+MOTIONIQ reconstructs hand motion from head-mounted factory video, offline on a CPU, and helps a data team find which seconds are **usable, uncertain or missing**. Every number traces back to source frames.
 
 ```text
 video -> 21 image + 21 hand-relative 3D landmarks per hand -> short-term tracks with explicit states
       -> task-specific quality windows -> ranked review queue -> traceable exports + synchronized replay
 ```
 
-Two users: a data engineer preparing hand-motion data, and expert knowledge capture (replay an expert's hands, mark steps, compare flat video with 3D). EgoHand Twin complements setup sheets, ERP and cross-training; it does not replace them.
+Two users: a data engineer preparing hand-motion data, and expert knowledge capture (replay an expert's hands, mark steps, compare flat video with 3D). MOTIONIQ complements setup sheets, ERP and cross-training; it does not replace them.
 
 ## Results at a glance
 
@@ -58,12 +58,12 @@ It installs dependencies, registers every video in `media/` (and the handoff cli
 Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, a laptop CPU.
 - **Linux:** MediaPipe also needs `libgles2 libegl1`.
 - **macOS:** `brew install ffmpeg`.
-- **Windows:** put FFmpeg on PATH, or set `EGOHAND_FFMPEG_DIR` to its `bin` folder. The CLI, backend and launch scripts use this folder before PATH. In PowerShell: `$env:EGOHAND_FFMPEG_DIR = 'C:\path\to\ffmpeg\bin'`.
+- **Windows:** put FFmpeg on PATH, or set `MOTIONIQ_FFMPEG_DIR` to its `bin` folder. The CLI, backend and launch scripts use this folder before PATH. In PowerShell: `$env:MOTIONIQ_FFMPEG_DIR = 'C:\path\to\ffmpeg\bin'`.
 
 ```sh
 uv sync --extra dev --extra viewer
-uv run egohand doctor                 # checks packages and that MediaPipe's native library loads
-uv run egohand fetch-model
+uv run motioniq doctor                 # checks packages and that MediaPipe's native library loads
+uv run motioniq fetch-model
 uv run rerun analytics disable        # keep the viewer fully offline
 ```
 
@@ -71,10 +71,10 @@ Process a clip with the chosen detector and review it (authorized clips go in `d
 
 ```sh
 V=data/private/clip.mp4
-uv run egohand process $V --out runs/clip --duration 30 --preset recall --rrd --governance data/private/governance.json
-uv run egohand validate runs/clip                       # per-frame JSON Schema check
-uv run egohand quality runs/clip $V                     # -> runs/clip/quality/ (windows, queue, summary)
-uv run egohand replay $V runs/clip --out runs/clip/review.rrd --quality runs/clip/quality
+uv run motioniq process $V --out runs/clip --duration 30 --preset recall --rrd --governance data/private/governance.json
+uv run motioniq validate runs/clip                       # per-frame JSON Schema check
+uv run motioniq quality runs/clip $V                     # -> runs/clip/quality/ (windows, queue, summary)
+uv run motioniq replay $V runs/clip --out runs/clip/review.rrd --quality runs/clip/quality
 uv run rerun runs/clip/review.rrd
 ```
 
@@ -94,7 +94,7 @@ A Django service in `backend/` exposes runs, frames, track lanes, quality window
 uv sync --extra dev --extra viewer --extra backend
 cd backend && uv run python manage.py migrate
 uv run python manage.py runserver 127.0.0.1:8000       # and, in another terminal:
-uv run python manage.py egohand_worker --recover
+uv run python manage.py motioniq_worker --recover
 ```
 
 Open **http://127.0.0.1:8000/**: the teammate's viewer is served with a *Backend* toolbar for loading completed runs (landmarks, side votes, experimental lift, frame-exact proxy video) or queueing new ones.
@@ -103,16 +103,16 @@ Open **http://127.0.0.1:8000/**: the teammate's viewer is served with a *Backend
 
 | Goal | Command |
 | --- | --- |
-| Export only usable intervals | `egohand export-segments RUN --out DIR --status suitable` |
-| Same-moment flat video vs 3D | `egohand compare VIDEO RUN --time 6.0 --out RUN/why3d.png` |
-| Teach-back step markers | `egohand steps-init RUN --out RUN/steps.json`, `steps-check`, then `replay ... --steps RUN/steps.json` |
-| Offline left/right vote | `egohand identity RUN --write-jsonl` (assumes every hand belongs to the wearer) |
-| Capture conditions and exclusions | `egohand conditions-init VIDEO --out c.json`; `evaluate ... --conditions c.json`; `conditions-apply RUN c.json` |
-| Governance and retention | `egohand governance-init --out g.json`; `egohand retention-report runs` (lists only, never deletes) |
-| Labels and evaluation | `egohand annotation-set` → label → `egohand label-review` (human check) → `label-review-apply` → `egohand evaluate RUN LABELS --split dev\|holdout` |
-| Experimental camera space | `egohand lift RUN --hfov 120 150 180`; `replay ... --lift RUN/lift_hfov150.npz` |
+| Export only usable intervals | `motioniq export-segments RUN --out DIR --status suitable` |
+| Same-moment flat video vs 3D | `motioniq compare VIDEO RUN --time 6.0 --out RUN/why3d.png` |
+| Teach-back step markers | `motioniq steps-init RUN --out RUN/steps.json`, `steps-check`, then `replay ... --steps RUN/steps.json` |
+| Offline left/right vote | `motioniq identity RUN --write-jsonl` (assumes every hand belongs to the wearer) |
+| Capture conditions and exclusions | `motioniq conditions-init VIDEO --out c.json`; `evaluate ... --conditions c.json`; `conditions-apply RUN c.json` |
+| Governance and retention | `motioniq governance-init --out g.json`; `motioniq retention-report runs` (lists only, never deletes) |
+| Labels and evaluation | `motioniq annotation-set` → label → `motioniq label-review` (human check) → `label-review-apply` → `motioniq evaluate RUN LABELS --split dev\|holdout` |
+| Experimental camera space | `motioniq lift RUN --hfov 120 150 180`; `replay ... --lift RUN/lift_hfov150.npz` |
 
-Run `uv run egohand <command> --help` for options. Further experimental flags:
+Run `uv run motioniq <command> --help` for options. Further experimental flags:
 - `--rescue guided,center,tiles` with `--max-crops` and `--crop-max-side`;
 - `--tracker-units diagonal`;
 - `--timestamp-source frames` (the slow full-decode probe).
@@ -121,7 +121,7 @@ Run `uv run egohand <command> --help` for options. Further experimental flags:
 
 | File | Content |
 | --- | --- |
-| `landmarks.jsonl` | One object per processed frame, including empty frames; raw and filtered coordinates, states, `missing_reason`, provenance, frame quality. Validates against `src/egohand_twin/schemas/egohand_twin_frame.schema.json`. |
+| `landmarks.jsonl` | One object per processed frame, including empty frames; raw and filtered coordinates, states, `missing_reason`, provenance, frame quality. Validates against `src/motioniq/schemas/motioniq_frame.schema.json`. |
 | `landmarks.csv` / `landmarks.npz` | One row per landmark / one row per track sample (21×3, NaN when missing; load with `allow_pickle=False`) |
 | `manifest.json` | Source and model hashes, all parameters (including the preset), coordinate definitions, governance, capture/lens provenance, package versions |
 | `metrics.json` | Coverage, per-stage timing, detector latency, sampled memory. **Coverage is not recall.** |
@@ -161,7 +161,7 @@ The full method is in [DEFINITIONS](docs/DEFINITIONS.md), with results in [RESUL
 
 `frontend/prototype/index.html` is a single-file offline viewer: video with the 2D skeleton, 3D hands, reliability lanes, signals, events and exports. It opens with clearly badged synthetic data and can load a local `landmarks.jsonl`, `identity.json`, `lift_*` files and a video; nothing is uploaded. See [frontend/README.md](frontend/README.md).
 
-`schema/egohand_twin_frame.schema.json` is the per-frame JSON Schema (identical to the copy packaged in `src/egohand_twin/schemas/` and used by `egohand validate`). `schema/egohand_twin_frame.example.json` is a synthetic example.
+`schema/motioniq_frame.schema.json` is the per-frame JSON Schema (identical to the copy packaged in `src/motioniq/schemas/` and used by `motioniq validate`). `schema/motioniq_frame.example.json` is a synthetic example.
 
 ## Compliance setup (every teammate, right after cloning)
 
@@ -183,6 +183,7 @@ Before making the repository public, run `scripts/check_history.sh` to scan the 
 | --- | --- |
 | [PRODUCT_BRIEF](docs/PRODUCT_BRIEF.md) | Product, status audit, priorities, organizer questions |
 | [RESULTS_V2](docs/RESULTS_V2.md) | All current measurements with denominators and reproduction commands |
+| [DEMO_SCRIPT](docs/DEMO_SCRIPT.md) | **Final demo:** project status, 6-slide plan, word-for-word 5-minute script on the web viewer, presenter checklist, top-10 Q&A |
 | [DEMO_AND_QA](docs/DEMO_AND_QA.md) | Five-minute demo, slides, claims checklist, judges' Q&A, user-test protocols |
 | [DEFINITIONS](docs/DEFINITIONS.md) | Frozen definitions of labels, states and metrics |
 | [SUBMISSION](docs/SUBMISSION.md) | Submission text and checklist |
@@ -194,7 +195,7 @@ Before making the repository public, run `scripts/check_history.sh` to scan the 
 ## Repository structure
 
 ```text
-src/egohand_twin/
+src/motioniq/
   cli.py         commands and presets          pipeline.py   timestamped processing, exports, timing
   model.py       MediaPipe wrapper, crops      tracking.py   association, states, smoothing, missing_reason
   render.py      preview video, Rerun replay   evaluation.py labels vs runs, continuity
@@ -213,3 +214,7 @@ tests/           core and backend test suites
 - [Rerun timelines](https://rerun.io/docs/concepts/logging-and-ingestion/timelines)
 - [OpenCV PnP](https://docs.opencv.org/4.x/d5/d1f/calib3d_solvePnP.html) and [fisheye model](https://docs.opencv.org/4.x/db/d58/group__calib3d__fisheye.html)
 - [WiLoR](https://github.com/rolpotamias/WiLoR) (mesh feasibility only; not integrated)
+
+### Name and configuration
+
+Use `uv run motioniq` and the `motioniq` Python package. Backend commands are `motioniq_worker` and `motioniq_register`; configuration uses `MOTIONIQ_*`. Existing `EGOHAND_*` environment settings are accepted when their new equivalents are absent, including the API token and private storage paths. Existing local runs and the database remain in place. Historical Git commits and private run artifacts are unchanged.

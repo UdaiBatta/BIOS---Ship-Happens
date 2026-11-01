@@ -94,7 +94,7 @@ class RtmHand:
     def __init__(self, directory: Path, box_threshold: float = .2, threads: int = 2, tiles: int = 4):
         missing = [n for n in RTM_MODELS if not (directory/n).exists()]
         if missing:
-            raise FileNotFoundError(f"RTM hand models missing in {directory}: run 'egohand fetch-model --rtm'")
+            raise FileNotFoundError(f"RTM hand models missing in {directory}: run 'motioniq fetch-model --rtm'")
         self.det = _session(directory/"rtmdet_nano_hand.onnx", threads)
         self.pose = _session(directory/"rtmpose_m_hand.onnx", threads)
         self.box_threshold = box_threshold

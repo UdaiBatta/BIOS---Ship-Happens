@@ -15,8 +15,8 @@ import time
 
 import cv2
 
-from egohand_twin.ffmpeg import require_tool
-from egohand_twin.render import VideoSink, composite
+from motioniq.ffmpeg import require_tool
+from motioniq.render import VideoSink, composite
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +120,8 @@ def prepare_task(video: Path, clip: dict, summary_dir: Path, preset: str) -> dic
     metrics = row["metrics"]
     if metrics.get("processed_frames") != frame_count:
         raise ValueError("cached frame count does not match its summary")
+    if manifest.get("source", {}).get("cfr") is not True:
+        raise ValueError("cached source must have verified constant frame rate for this renderer")
     source_fps = manifest.get("source", {}).get("fps")
     if isinstance(source_fps, bool) or not isinstance(source_fps, (int, float)) or not math.isfinite(source_fps) or source_fps <= 0:
         raise ValueError("cached source frame rate is invalid")
@@ -232,7 +234,7 @@ def render_task(task: dict, output_dir: Path, preset: str) -> dict:
 
 def write_readme(path: Path, preset: str, results: list[tuple[dict, dict]]) -> None:
     lines = [
-        "EgoHand Twin common-clip review renders",
+        "MOTIONIQ common-clip review renders",
         "",
         f"Selected preset: {preset}. This selection is explicit and does not claim the preset is best.",
         "Label status: not reviewed. Accuracy is not measured by these renders.",

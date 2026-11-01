@@ -45,9 +45,9 @@ def test_api_request_keeps_token_in_header_and_uses_loopback(monkeypatch):
 
 def test_worker_detection_matches_management_worker_without_printing_process_data(monkeypatch):
     backend = Path(preflight.__file__).resolve().parent.parent / "backend"
-    worker = SimpleNamespace(info={"cmdline": ["python", "manage.py", "egohand_worker", "--recover"]},
+    worker = SimpleNamespace(info={"cmdline": ["python", "manage.py", "motioniq_worker", "--recover"]},
                              cwd=lambda: str(backend))
-    unrelated = SimpleNamespace(info={"cmdline": ["python", "manage.py", "egohand_worker"]},
+    unrelated = SimpleNamespace(info={"cmdline": ["python", "manage.py", "motioniq_worker"]},
                                 cwd=lambda: str(backend.parent / "other-project"))
     monkeypatch.setattr(preflight.psutil, "process_iter", lambda attrs: [unrelated, worker])
     assert preflight.check_worker() == (True, "worker process found")
@@ -55,7 +55,7 @@ def test_worker_detection_matches_management_worker_without_printing_process_dat
 
 def test_worker_access_denied_is_a_failure(monkeypatch):
     class HiddenProcess:
-        info = {"cmdline": ["python", "manage.py", "egohand_worker"]}
+        info = {"cmdline": ["python", "manage.py", "motioniq_worker"]}
 
         def cwd(self):
             raise psutil.AccessDenied(pid=123)
@@ -86,7 +86,7 @@ def test_run_checks_report_each_required_check(monkeypatch):
     monkeypatch.setattr(preflight, "check_power", lambda: (True, "AC power connected"))
     monkeypatch.setattr(preflight, "find_tool", lambda name: f"/{name}")
     monkeypatch.setattr(preflight.shutil, "disk_usage", lambda path: SimpleNamespace(free=3 * 1024**3))
-    monkeypatch.setenv("EGOHAND_API_TOKEN", "never-print-me")
+    monkeypatch.setenv("MOTIONIQ_API_TOKEN", "never-print-me")
 
     checks = preflight.run_checks("12345678-1234-5678-1234-567812345678")
 
@@ -133,7 +133,7 @@ def test_cli_does_not_print_api_errors_or_token(monkeypatch, capsys):
     monkeypatch.setattr(preflight, "check_power", lambda: (True, "AC power connected"))
     monkeypatch.setattr(preflight, "find_tool", lambda name: name)
     monkeypatch.setattr(preflight.shutil, "disk_usage", lambda path: SimpleNamespace(free=3 * 1024**3))
-    monkeypatch.setenv("EGOHAND_API_TOKEN", "token-secret")
+    monkeypatch.setenv("MOTIONIQ_API_TOKEN", "token-secret")
 
     assert preflight.main(["--run", "12345678-1234-5678-1234-567812345678"]) == 1
     output = capsys.readouterr().out

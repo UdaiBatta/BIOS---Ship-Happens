@@ -3,8 +3,8 @@ from pathlib import Path
 
 import numpy as np
 
-from egohand_twin.hybrid import RtmHand
-from egohand_twin.model import Detection, map_crop_detection, square_box
+from motioniq.hybrid import RtmHand
+from motioniq.model import Detection, map_crop_detection, square_box
 
 
 def test_crop_detection_maps_back_to_full_frame():

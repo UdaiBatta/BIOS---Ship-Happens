@@ -3,7 +3,7 @@
 Usage:  uv run python scripts/benchmark_hybrid.py VIDEO --duration 30 [--start 0] [--workers 2]
             [--presets baseline recall accurate hybrid] [--out runs/bench]
 
-For each preset it runs `egohand process --no-video` into a fresh folder and reports wall
+For each preset it runs `motioniq process --no-video` into a fresh folder and reports wall
 seconds, end-to-end FPS, detector p50/p95 per frame, per-stage seconds and the sampled peak
 RSS from metrics.json. MediaPipe runs on the CPU (its Python GPU delegate is not available on
 Windows); the RTM models run with onnxruntime on the CPU. Outputs stay under runs/ (git-ignored).
@@ -32,7 +32,7 @@ def main():
     rows = []
     for preset in a.presets:
         out = Path(a.out)/f"{stamp}-{preset}"
-        cmd = [sys.executable, "-m", "egohand_twin.cli", "process", a.video, "--out", str(out), "--preset", preset,
+        cmd = [sys.executable, "-m", "motioniq.cli", "process", a.video, "--out", str(out), "--preset", preset,
                "--start-seconds", str(a.start), "--duration", str(a.duration), "--workers", str(a.workers), "--no-video"]
         t0 = time.perf_counter()
         done = subprocess.run(cmd, capture_output=True, text=True)

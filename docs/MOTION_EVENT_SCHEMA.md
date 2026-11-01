@@ -1,6 +1,6 @@
-# Motion event schema (`RUN/motion_events.json`, `egohand_motion_events/0.1`)
+# Motion event schema (`RUN/motion_events.json`, `motioniq_motion_events/0.1`)
 
-**Producers:** `egohand events RUN`, and every backend run (written after the side vote). **Consumers:** the viewer's events strip and list (hold, movement and long gap; entry and exit duplicate the lanes) and the review buttons.
+**Producers:** `motioniq events RUN`, and every backend run (written after the side vote). **Consumers:** the viewer's events strip and list (hold, movement and long gap; entry and exit duplicate the lanes) and the review buttons.
 
 ```json
 {"event_id": "mev00012", "track_id": 4, "hand": "right|left|unknown", "event_type": "candidate_hold",

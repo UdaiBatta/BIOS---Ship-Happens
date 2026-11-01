@@ -3,9 +3,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from egohand_twin.handfit import MEDIAN_HAND, fit_hand
-from egohand_twin.hybrid import HybridDetector, RtmHand, _overlap
-from egohand_twin.model import Detection
+from motioniq.handfit import MEDIAN_HAND, fit_hand
+from motioniq.hybrid import HybridDetector, RtmHand, _overlap
+from motioniq.model import Detection
 
 MODELS = Path(__file__).resolve().parents[1]/"models"/"rtm"
 

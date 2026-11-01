@@ -84,7 +84,7 @@ def fit_image(image, width, height):
 
 def composite(frame, sample, subtitle="FACTORY POV  /  MEDIAPIPE HAND LANDMARKER"):
     canvas = np.full((900, 1600, 3), BG, np.uint8)
-    text(canvas, "EGOHAND TWIN", 28, 47, 1.15, TEXT, 2)
+    text(canvas, "MOTIONIQ", 28, 47, 1.15, TEXT, 2)
     text(canvas, subtitle, 30, 78, .55, MUTED)
     text(canvas, f'{sample["timestamp_s"]:08.3f}s  |  frame {sample["frame_index"]}',
          1120, 45, .65, MUTED)
@@ -147,14 +147,14 @@ class RerunSink:
     def __init__(self, path: Path, lift: dict | None = None, quality: dict | None = None,
                  steps: list | None = None):
         """``lift`` optionally maps (frame_index, track_id) -> 21x3 camera-space joints from
-        ``egohand lift``; it is shown in its own EXPERIMENTAL view, never mixed with the
+        ``motioniq lift``; it is shown in its own EXPERIMENTAL view, never mixed with the
         hand-relative view."""
         import rerun as rr
         import rerun.blueprint as rrb
         self.rr = rr
         self.lift = lift
         self.quality = quality
-        rr.init("egohand_twin", spawn=False)
+        rr.init("motioniq", spawn=False)
         rr.save(str(path))
         views = [rrb.Spatial2DView(origin="video", name="Source + 2D (normalized image coords)"),
                  rrb.Spatial3DView(origin="hands", name="Hand-relative 3D (MediaPipe m, wrist-centred; spacing arbitrary)",

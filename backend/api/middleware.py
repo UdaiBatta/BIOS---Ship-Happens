@@ -36,7 +36,7 @@ class CorsMiddleware:
 
 
 class TokenAuthMiddleware:
-    """If EGOHAND_API_TOKEN is set, every /api/ request needs 'Authorization: Bearer <token>'."""
+    """If MOTIONIQ_API_TOKEN is set, every /api/ request needs 'Authorization: Bearer <token>'."""
     def __init__(self, get_response):
         self.get_response = get_response
 

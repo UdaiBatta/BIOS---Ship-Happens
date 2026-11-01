@@ -1,6 +1,6 @@
 import numpy as np
 
-from egohand_twin.render import RerunSink, color, composite, hand_label
+from motioniq.render import RerunSink, color, composite, hand_label
 
 
 def test_overlay_keeps_unknown_side_distinct_from_right():

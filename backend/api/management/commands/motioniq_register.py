@@ -8,7 +8,7 @@ from api.views import VIDEO_SUFFIXES, scan_media  # noqa: F401  (VIDEO_SUFFIXES 
 
 class Command(BaseCommand):
     help = ("Register a video file, or every video in a folder (recursively), without running the server. "
-            "Paths must be under EGOHAND_MEDIA_ROOTS. Already registered, unchanged files are skipped.")
+            "Paths must be under MOTIONIQ_MEDIA_ROOTS. Already registered, unchanged files are skipped.")
 
     def add_arguments(self, parser):
         parser.add_argument("paths", nargs="+")

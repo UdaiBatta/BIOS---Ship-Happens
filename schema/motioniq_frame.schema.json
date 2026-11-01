@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/egohand-twin/frame.schema.json",
-  "title": "EgoHand Twin — per-frame record (landmarks.jsonl line), v1",
-  "description": "One JSON object per processed video frame, including frames with no hands. Extends the EgoHand Twin milestone JSONL with camera-space 3D, wrist pose, grip aperture, quality masks and provenance. Field names follow the milestone where they already exist. Aligned with Project Aria MPS hand tracking (camera/device-frame metres, per-hand confidence, wrist pose, palm normal), Apple EgoDex (per-joint pose + confidence, NaN/0 for occluded) and LeRobot (timestamp / frame_index). Coordinates: image_* are normalised to the source frame; world_* are MediaPipe hand-relative metres; cam_* are camera-frame metres (x right, y down, z forward) estimated with the lens model in manifest.json. Landmark order is MediaPipe's 21-point order unless stated otherwise.",
+  "$id": "https://example.invalid/motioniq/frame.schema.json",
+  "title": "MOTIONIQ — per-frame record (landmarks.jsonl line), v1",
+  "description": "One JSON object per processed video frame, including frames with no hands. Extends the MOTIONIQ milestone JSONL with camera-space 3D, wrist pose, grip aperture, quality masks and provenance. Field names follow the milestone where they already exist. Aligned with Project Aria MPS hand tracking (camera/device-frame metres, per-hand confidence, wrist pose, palm normal), Apple EgoDex (per-joint pose + confidence, NaN/0 for occluded) and LeRobot (timestamp / frame_index). Coordinates: image_* are normalised to the source frame; world_* are MediaPipe hand-relative metres; cam_* are camera-frame metres (x right, y down, z forward) estimated with the lens model in manifest.json. Landmark order is MediaPipe's 21-point order unless stated otherwise.",
   "type": "object",
   "required": ["frame_index", "timestamp_s", "source_pts_s", "hands"],
   "additionalProperties": true,

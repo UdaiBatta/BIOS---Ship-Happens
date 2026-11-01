@@ -1,4 +1,4 @@
-/* EgoHand Twin viewer <-> local Django backend connector.
+/* MOTIONIQ viewer <-> local Django backend connector.
  *
  * Active only when the page is served over HTTP by the backend (`manage.py runserver`, then
  * open http://127.0.0.1:8000/). Opened as a local file (file://) it does nothing and makes no
@@ -15,8 +15,8 @@
   if (!/^https?:$/.test(location.protocol)) return;
 
   const params = new URLSearchParams(location.search);
-  if (params.get('token')) sessionStorage.setItem('egohandToken', params.get('token'));
-  const token = sessionStorage.getItem('egohandToken') || '';
+  if (params.get('token')) sessionStorage.setItem('motioniqToken', params.get('token'));
+  const token = sessionStorage.getItem('motioniqToken') || sessionStorage.getItem('egohandToken') || '';
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const withToken = (url) => (token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url);
 
@@ -37,7 +37,7 @@
   bar.setAttribute('role', 'toolbar');
   bar.setAttribute('aria-label', 'Local backend');
   bar.innerHTML = `
-    <span class="note" title="Local EgoHand Twin backend on this machine">Backend video:</span>
+    <span class="note" title="Local MOTIONIQ backend on this machine">Backend video:</span>
     <select class="btn" id="bkVideo" aria-label="Source video" style="max-width: 20rem" title="Source video. The run list shows only this video's runs; Process uses it."></select>
     <button class="btn" id="bkRefresh" title="Find videos added to the media folder and refresh the lists">↻ scan</button>
     <label class="btn" title="Upload a video into the backend's private upload folder">Upload…<input type="file" id="bkUpload" accept=".mp4,.mov,.mkv,.avi" hidden></label>
@@ -95,18 +95,26 @@
   // Picking a video SHOWS it: its newest completed run is loaded, or, if it has never been processed,
   // a still frame at the chosen start replaces the synthetic demo and the Process button is highlighted.
   async function showVideo() {
+    previewRequest += 1;
     const mine = fillRuns();
     const video = selectedVideo();
     if (!video) return;
     if (mine.length) { await loadRun(mine[0].id); return; }   // newest first
-    showPreview(video);
+    await showPreview(video);
     toast(`${video.name} has not been processed yet. Set start and length, choose a preset (accurate finds the most hands), then press Process.`);
   }
-  function showPreview(video) {
+  let previewRequest = 0;
+  async function showPreview(video) {
+    const requestId = ++previewRequest;
     setPlaying(false);
-    const start = Math.min(Math.max(0, Number(document.getElementById('bkStart').value) || 0), Math.max(0, video.duration_s - 1 / video.fps));
-    const frame = Math.min(video.frame_count - 1, Math.round(start * video.fps));
-    loadFrames([{ frame_index: frame, timestamp_s: frame / video.fps, hands: [], _fileMasks: {} }],
+    const startInput = document.getElementById('bkStart');
+    const startValue = startInput.value;
+    const start = Math.min(Math.max(0, Number(startValue) || 0), video.duration_s);
+    const selected = video.available === false ? { frame_index: 0, timestamp_s: 0 }
+      : await json(`videos/${video.id}/frame-at?time_s=${encodeURIComponent(start)}`);
+    if (requestId !== previewRequest || selectedVideo()?.id !== video.id || startInput.value !== startValue) return;
+    const frame = selected.frame_index;
+    loadFrames([{ frame_index: frame, timestamp_s: selected.timestamp_s, hands: [], _fileMasks: {} }],
       { synthetic: false, clipId: `${video.name} · not processed yet` });
     const player = document.getElementById('video');
     if (player.src && player.src.startsWith('blob:')) URL.revokeObjectURL(player.src);
@@ -166,6 +174,7 @@
   }
 
   async function loadRun(id) {
+    previewRequest += 1;
     const run = await json(`runs/${id}`);
     status(`loading run ${id.slice(0, 8)}…`);
     if (Number(document.getElementById('bkVideo').value) !== run.video_id) {
@@ -209,7 +218,7 @@
       catch { /* the summary was already reported above */ }
     }
     // Solid hands: a surface generated from the lifted joints (not a fitted hand model).
-    if (!window.EgoHandMesh) {
+    if (!window.MotionIQMesh) {
       messages.push('3D hand surfaces unavailable: the server is running older code. Close the worker window, stop the server (Ctrl+C) and start scripts/run_local again');
     } else if (run.artifacts?.lift) {
       try {
@@ -250,17 +259,17 @@
       if (HAS_3D.has(h.state) && h.cam_xyz_m) hands.push({ frame_index: f.frame_index, track_id: h.track_id, joints: h.cam_xyz_m });
     }
     if (!hands.length) throw new Error('no observed hand has camera-space 3D');
-    const message = applyMesh(EgoHandMesh.forHands(hands), 'lifted joints');
+    const message = applyMesh(MotionIQMesh.forHands(hands), 'lifted joints');
     S.mesh.label = 'procedural low-poly hand skinned on the 21 lifted joints (typical proportions, one size per track; not a fitted hand-shape model)';
     S.mesh.licence = 'same assumed-lens depth caveats as the camera-space 3D';
     return message;
   }
 
   // Confirm / reject a candidate motion event (stored with the run's review decisions).
-  window.EgoHandReview = async (event, verdict) => {
-    const reviewer = (localStorage.getItem('egohandReviewer') || prompt('Your initials for the review record:') || '').trim();
+  window.MotionIQReview = async (event, verdict) => {
+    const reviewer = (localStorage.getItem('motioniqReviewer') || localStorage.getItem('egohandReviewer') || prompt('Your initials for the review record:') || '').trim();
     if (!reviewer) return;
-    localStorage.setItem('egohandReviewer', reviewer);
+    localStorage.setItem('motioniqReviewer', reviewer);
     try {
       await json(`runs/${S.currentRunId}/review-queue/${event.event_id}/decisions`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ verdict, reviewer, note: `motion event ${event.event_type}` }) });
@@ -282,10 +291,10 @@
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const current = await json(`runs/${run.id}`);
       const waiting = current.status === 'queued' && Date.now() - queuedSince > 10000
-        ? ' (still queued: is the worker running? manage.py egohand_worker)' : '';
+        ? ' (still queued: is the worker running? manage.py motioniq_worker)' : '';
       status(`run ${run.id.slice(0, 8)}: ${current.stage} ${(current.progress * 100).toFixed(0)}%${waiting}`);
       if (current.status === 'complete') { await refresh(run.id); await loadRun(run.id); return; }
-      if (['failed', 'cancelled'].includes(current.status)) { toast(`Run ${current.status}: ${current.error || ''}`); return; }
+      if (['failed', 'cancelled'].includes(current.status)) { status(`run ${run.id.slice(0, 8)} ${current.status}`); toast(`Run ${current.status}: ${current.error || ''}`); return; }
     }
   }
 
@@ -298,16 +307,16 @@
   }));
   document.getElementById('bkRefresh').addEventListener('click', guard(async () => { if ((await scan()).registered.length) await showVideo(); }));
   document.getElementById('bkVideo').addEventListener('change', guard(showVideo));
-  document.getElementById('bkStart').addEventListener('change', () => {
+  document.getElementById('bkStart').addEventListener('change', guard(async () => {
     const video = selectedVideo();
-    if (video && !runs.some((r) => r.video_id === video.id)) showPreview(video);   // the preview follows the start time
-  });
+    if (video && !runs.some((r) => r.video_id === video.id)) await showPreview(video);   // the preview follows the start time
+  }));
   document.getElementById('bkUpload').addEventListener('change', guard(async (e) => {
     const file = e.target.files[0]; e.target.value = '';
     if (!file) return;
     const video = await upload(file);
     await refresh(undefined, video.id);
-    showPreview(selectedVideo() || video);
+    await showPreview(selectedVideo() || video);
     status(`uploaded ${video.name}`); toast(`Uploaded ${file.name} (${video.duration_s.toFixed(0)} s). Choose a segment and Process.`);
   }));
   document.getElementById('bkProcess').addEventListener('click', guard(processVideo));

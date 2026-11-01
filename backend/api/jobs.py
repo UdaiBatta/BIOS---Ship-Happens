@@ -1,6 +1,6 @@
 """Database-backed job runner for processing runs (no Redis/Celery needed).
 
-Start one or more workers with ``python manage.py egohand_worker``. Each worker claims
+Start one or more workers with ``python manage.py motioniq_worker``. Each worker claims
 the oldest queued run with an atomic conditional UPDATE, so two workers never process
 the same run. MediaPipe inference is CPU-bound: run about one worker per two cores, or
 one worker with ``workers>1`` per run for parallel chunked detection.
@@ -68,10 +68,10 @@ def build_process_argv(run: Run, out_dir: Path) -> list[str]:
 
 def execute(run: Run, process=None) -> None:
     """Run the pipeline for ``run`` and post-process outputs. ``process`` is injectable for tests."""
-    from egohand_twin.cli import process_args
-    from egohand_twin.quality import write_quality
+    from motioniq.cli import process_args
+    from motioniq.quality import write_quality
     if process is None:
-        from egohand_twin.parallel import process_parallel
+        from motioniq.parallel import process_parallel
         process = process_parallel
     assert_video_unchanged(run.video)
     out_dir = settings.RUNS_DIR/str(run.id)
@@ -96,12 +96,12 @@ def execute(run: Run, process=None) -> None:
     Run.objects.filter(pk=run.pk).update(stage="indexing", progress=.97, quality_summary=summary)
     # Inputs for the viewer: whole-track side vote and the EXPERIMENTAL assumed-lens lift
     # (its summary carries "ASSUMED (not calibrated)", which the viewer displays).
-    from egohand_twin.identity import write_identity
+    from motioniq.identity import write_identity
     write_identity(out_dir)
-    from egohand_twin.motion_events import write_events
+    from motioniq.motion_events import write_events
     write_events(out_dir)            # inferred candidate events (entry/exit/gap/hold/movement)
     if settings.LIFT_HFOV:
-        from egohand_twin.lift import lift_run
+        from motioniq.lift import lift_run
         lift_run(out_dir, settings.LIFT_HFOV)
     check_cancelled(run.pk)
     index_path = build_frame_index(out_dir)

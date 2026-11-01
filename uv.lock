@@ -177,7 +177,7 @@ wheels = [
 ]
 
 [[package]]
-name = "egohand-twin"
+name = "motioniq"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

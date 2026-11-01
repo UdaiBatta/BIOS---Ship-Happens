@@ -171,6 +171,7 @@ Before making the repository public, run `scripts/check_history.sh` to scan the 
 | --- | --- |
 | [PRODUCT_BRIEF](docs/PRODUCT_BRIEF.md) | Product, status audit, priorities, organizer questions |
 | [RESULTS_V2](docs/RESULTS_V2.md) | All current measurements with denominators and reproduction commands |
+| [DEMO_SCRIPT](docs/DEMO_SCRIPT.md) | **Final demo:** project status, 6-slide plan, word-for-word 5-minute script on the web viewer, presenter checklist, top-10 Q&A |
 | [DEMO_AND_QA](docs/DEMO_AND_QA.md) | Five-minute demo, slides, claims checklist, judges' Q&A, user-test protocols |
 | [DEFINITIONS](docs/DEFINITIONS.md) | Frozen definitions of labels, states and metrics |
 | [SUBMISSION](docs/SUBMISSION.md) | Submission text and checklist |

@@ -64,6 +64,8 @@
   }
   .btn:hover { background: var(--surface-3); }
   .btn:focus-visible, .seg button:focus-visible, .ev:focus-visible { outline: 2px solid var(--right); outline-offset: 1px; }
+  .btn.cta { background: var(--right); color: #fff; border-color: var(--right); }
+  .btn.cta:hover { filter: brightness(1.15); background: var(--right); }
   .btn[disabled], .btn.disabled { color: var(--muted); cursor: not-allowed; background: transparent; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
   .seg button {
@@ -744,6 +746,8 @@ function drawVideo() {
   const f = S.frames[S.idx];
   if (S.video && S.video.readyState >= 2) {
     g.drawImage(S.video, 0, 0, w, h);
+  } else if (S.poster && S.poster.complete && S.poster.naturalWidth) {
+    g.drawImage(S.poster, 0, 0, w, h);   // still frame of a selected, not yet processed backend video
   } else {
     g.fillStyle = '#141413'; g.fillRect(0, 0, w, h);
     const grad = g.createRadialGradient(w / 2, h / 2, h * 0.1, w / 2, h / 2, w * 0.62);
@@ -1572,6 +1576,7 @@ function loadFrames(frames, { synthetic, clipId }) {
   $('lblResults').setAttribute('aria-disabled', String(synthetic));
   updateVideoBadge();
   S.mesh = null;   // meshes come only from a loaded mesh file; there is no synthetic stand-in
+  S.poster = null;
   S.view = null; S.selection = null; renderSelection();
   deriveAll(); seek(S.tStart); renderChips(); renderBreakdown(); renderEvents(); updateThreeBadge(); renderMeshNote();
   $('footer').textContent = synthetic

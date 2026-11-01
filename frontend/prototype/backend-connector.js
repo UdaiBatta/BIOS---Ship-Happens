@@ -86,6 +86,47 @@
       runSelect.append(Object.assign(document.createElement('option'), { value: r.id, textContent: label }));
     }
     if (selectId && mine.some((r) => r.id === selectId)) runSelect.value = selectId;
+    document.getElementById('bkLoad').disabled = !mine.length;
+    document.getElementById('bkProcess').classList.toggle('cta', !mine.length);
+    return mine;
+  }
+  const selectedVideo = () => videos.find((v) => v.id === Number(document.getElementById('bkVideo').value));
+
+  // Picking a video SHOWS it: its newest completed run is loaded, or, if it has never been processed,
+  // a still frame at the chosen start replaces the synthetic demo and the Process button is highlighted.
+  async function showVideo() {
+    const mine = fillRuns();
+    const video = selectedVideo();
+    if (!video) return;
+    if (mine.length) { await loadRun(mine[0].id); return; }   // newest first
+    showPreview(video);
+    toast(`${video.name} has not been processed yet. Set start and length, choose a preset (accurate finds the most hands), then press Process.`);
+  }
+  function showPreview(video) {
+    setPlaying(false);
+    const start = Math.min(Math.max(0, Number(document.getElementById('bkStart').value) || 0), Math.max(0, video.duration_s - 1 / video.fps));
+    const frame = Math.min(video.frame_count - 1, Math.round(start * video.fps));
+    loadFrames([{ frame_index: frame, timestamp_s: frame / video.fps, hands: [], _fileMasks: {} }],
+      { synthetic: false, clipId: `${video.name} · not processed yet` });
+    const player = document.getElementById('video');
+    if (player.src && player.src.startsWith('blob:')) URL.revokeObjectURL(player.src);
+    player.removeAttribute('src'); player.load();
+    S.video = null; S.videoOffset = 0; S.extraEvents = []; S.currentRunId = null;
+    if (video.available === false) {
+      document.getElementById('videoBadge').textContent = 'Video file missing on disk: check the media folder';
+    } else {
+      const poster = new Image();
+      poster.onload = () => { S.dirty = true; };
+      poster.onerror = () => { document.getElementById('videoBadge').textContent = 'Preview frame could not be read (see the server window)'; };
+      poster.src = withToken(`/api/videos/${video.id}/frames/${frame}.jpg?width=${Math.min(960, video.width)}`);
+      S.poster = poster;
+      document.getElementById('videoBadge').textContent = `Preview frame at ${start.toFixed(1)} s · not processed yet: press Process`;
+    }
+    document.getElementById('footer').textContent =
+      `${video.name} (${video.duration_s.toFixed(0)} s) has no completed run yet. Nothing is tracked until you press Process; the frame shown is a still preview.`;
+    document.getElementById('threeBadge').textContent = 'Not processed yet · 3D hands appear after Process';
+    status(`${video.name}: not processed yet`);
+    S.dirty = true;
   }
   async function refresh(selectId, videoId) {
     [runs, videos] = await Promise.all([json('runs?status=complete').then((d) => d.runs), json('videos').then((d) => d.videos)]);
@@ -106,6 +147,7 @@
     const failed = report.failed.map((f) => `${f.name}: ${f.error}`).join('; ');
     status(`${videos.length} video(s) · ${report.registered.length} new`);
     if (report.registered.length || failed) toast(`Scan: ${report.registered.length} new video(s)` + (failed ? ` · not registered: ${failed}` : ''));
+    return report;
   }
   function upload(file) {
     return new Promise((resolve, reject) => {
@@ -137,6 +179,7 @@
     if (!out.length) throw new Error('the run has no frame records');
     loadFrames(out, { synthetic: false, clipId: `${run.video.name} · ${run.preset} · run ${id.slice(0, 8)}` });
     S.landmarksSha256 = checksum;
+    S.poster = null;
     const messages = [];
     if (bad) messages.push(`${bad} lines skipped`);
     if (rule) messages.push(`${rule} predicted/lost hands carried 3D and are shown as 2D only`);
@@ -252,15 +295,20 @@
   };
   document.getElementById('bkLoad').addEventListener('click', guard(async () => {
     const id = document.getElementById('bkRuns').value;
-    if (id) await loadRun(id); else toast('No completed run selected.');
+    if (id) await loadRun(id); else toast('This video has no completed run yet: press Process first.');
   }));
-  document.getElementById('bkRefresh').addEventListener('click', guard(scan));
-  document.getElementById('bkVideo').addEventListener('change', () => fillRuns());
+  document.getElementById('bkRefresh').addEventListener('click', guard(async () => { if ((await scan()).registered.length) await showVideo(); }));
+  document.getElementById('bkVideo').addEventListener('change', guard(showVideo));
+  document.getElementById('bkStart').addEventListener('change', () => {
+    const video = selectedVideo();
+    if (video && !runs.some((r) => r.video_id === video.id)) showPreview(video);   // the preview follows the start time
+  });
   document.getElementById('bkUpload').addEventListener('change', guard(async (e) => {
     const file = e.target.files[0]; e.target.value = '';
     if (!file) return;
     const video = await upload(file);
     await refresh(undefined, video.id);
+    showPreview(selectedVideo() || video);
     status(`uploaded ${video.name}`); toast(`Uploaded ${file.name} (${video.duration_s.toFixed(0)} s). Choose a segment and Process.`);
   }));
   document.getElementById('bkProcess').addEventListener('click', guard(processVideo));
@@ -273,6 +321,7 @@
     const presets = await loadPresets();
     await refresh();
     try { await scan(); } catch (error) { toast(`Scan failed: ${error.message}`); }   // pick up new files
+    if (videos.length) await showVideo();
     if (!presets.includes('accurate')) toast('The server is running older code (no "accurate" preset). Stop it and the worker, then start scripts/run_local again.');
     status(`connected · ${runs.length} run(s)${health.auth_required && !token ? ' · token required (?token=…)' : ''}`);
   })();

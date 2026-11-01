@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from egohand_twin.model import (Detection, MultiViewDetector, is_duplicate, map_crop_detection,
+from motioniq.model import (Detection, MultiViewDetector, is_duplicate, map_crop_detection,
                                 square_box, tile_boxes)
 
 W, H = 1920, 1080
@@ -136,7 +136,7 @@ def test_guided_gate_rejects_far_candidates_and_crop_budget():
 
 
 def test_bottom_padded_crop_maps_back_to_source_pixels():
-    from egohand_twin.model import map_crop_detection
+    from motioniq.model import map_crop_detection
     box = (W//6, H//2, 5*W//6, H + H//4)   # 1280 x 810 box, 270 px of padding below the frame
     d = hand(.5, 2/3)                     # wrist at crop pixel (640, 540) == source bottom edge
     mapped = map_crop_detection(d, box, W, H, "center_crop_rescue", "bottom_padded_crop")

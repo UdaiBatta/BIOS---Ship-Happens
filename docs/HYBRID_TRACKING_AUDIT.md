@@ -1,6 +1,6 @@
-# Hybrid tracking audit (PS4 EgoHand Twin, branch `udai-s1`)
+# Hybrid tracking audit (PS4 MOTIONIQ, branch `udai-s1`)
 
-Scope: the application on this branch: Python pipeline `src/egohand_twin`, Django backend `backend/`, and the teammate's viewer `frontend/prototype`. This is the PS4 application running on the team laptop. `Bios-Hackathon` and the PS2/Therblig work are not part of this repository and were not touched.
+Scope: the application on this branch: Python pipeline `src/motioniq`, Django backend `backend/`, and the teammate's viewer `frontend/prototype`. This is the PS4 application running on the team laptop. `Bios-Hackathon` and the PS2/Therblig work are not part of this repository and were not touched.
 
 - Known-working revision before this work: `0f50e26`.
 - All numbers are on one clip (`mytronlabs-000060-016`), with provisional labels: dev 0–30 s, holdout 60–150 s.

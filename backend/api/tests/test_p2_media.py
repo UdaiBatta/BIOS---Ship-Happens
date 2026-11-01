@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import tempfile
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -13,7 +14,7 @@ from django.test import TestCase, override_settings
 
 from api import jobs, services
 from api.models import Run, Video
-from egohand_twin.pipeline import probe
+from motioniq.pipeline import probe
 from api.tests.test_api import make_video
 
 
@@ -186,3 +187,13 @@ class MediaRegressionTests(TestCase):
         self.assertEqual(proxy["frames"], len(expected))
         self.assertEqual(len(proxy_times), len(expected))
         self.assertLessEqual(float(np.max(np.abs(proxy_times - expected))), 1e-6)
+
+    def test_frame_at_time_uses_presentation_timestamps_and_rejects_invalid_times(self):
+        video = self.post("/api/videos", {"path": str(self.video)}).json()
+        timestamps = np.r_[0., .08, .4, .47 + np.arange(37)*.1]
+        with patch("api.views.services.video_timestamps", return_value=timestamps):
+            selected = self.client.get(f"/api/videos/{video['id']}/frame-at?time_s=0.1")
+            self.assertEqual(selected.status_code, 200)
+            self.assertEqual(selected.json(), {"frame_index": 2, "timestamp_s": .4})
+            for value in ("-0.1", "nan", "inf", "4.2"):
+                self.assertEqual(self.client.get(f"/api/videos/{video['id']}/frame-at?time_s={value}").status_code, 400)

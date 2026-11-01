@@ -1,5 +1,7 @@
 # Smoothing comparison (why raw looked better)
 
+The numerical table below is historical. The current smoother also stabilizes 3D finger directions and bone lengths; its new temporal measurements and tradeoffs are in [POSE_STABILITY](POSE_STABILITY.md). Those are stability checks, not a new accuracy evaluation.
+
 **Root cause:** the old One Euro filter used `beta = 0.03` in normalised image units. Hand speeds are about 0.5 units/s, so it acted as a fixed 1.7 Hz low-pass and trailed fast hands by 65–80 px. It was applied to all 21 joints independently and was keyed per track (no cross-track contamination; reset after 0.2 s gaps).
 
 **Compared on identical tracks**, against labelled wrists (provisional labels; 1920×1080 px):
@@ -19,4 +21,4 @@
 - **E, bone-length-constrained 2D smoothing.** 2D bone lengths change with foreshortening. Bone-length calibration is applied to the mesh instead ([HAND_MESH_ARCHITECTURE](HAND_MESH_ARCHITECTURE.md)).
 - **Savitzky–Golay and quaternion joint-angle smoothing.** Not tried for time reasons.
 
-**Implementation:** `src/egohand_twin/smoothing.py`, an offline pass before the exports are written. Raw values are never modified, and the viewer's Raw/Smoothed toggle still compares them.
+**Implementation:** `src/motioniq/smoothing.py`, an offline pass before the exports are written. Raw values are never modified, and the viewer's Raw/Smoothed toggle still compares them.

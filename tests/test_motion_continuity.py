@@ -1,8 +1,8 @@
 """One Euro smoothing: less jitter when still, follows real motion, resets after gaps, per track."""
 import numpy as np
 
-from egohand_twin.model import Detection
-from egohand_twin.tracking import IdentityTracker, OneEuro
+from motioniq.model import Detection
+from motioniq.tracking import IdentityTracker, OneEuro
 
 
 def test_jitter_reduced_on_a_still_point():

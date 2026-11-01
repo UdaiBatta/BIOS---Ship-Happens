@@ -27,8 +27,8 @@ def make_video(folder: Path) -> Path:
 
 
 def fake_process(args, progress=None, workers=1):
-    """Writes a schema-shaped run like egohand_twin.pipeline.process would."""
-    from egohand_twin.model import sha256
+    """Writes a schema-shaped run like motioniq.pipeline.process would."""
+    from motioniq.model import sha256
     out = Path(args.out)
     out.mkdir(parents=True)
     lines, events = [], []

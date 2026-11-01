@@ -1,8 +1,8 @@
 """Test 8: an RTMPose-only hand has 2D output, keeps its track, and is never reported as observed 3D."""
 import numpy as np
 
-from egohand_twin.model import Detection
-from egohand_twin.tracking import IdentityTracker
+from motioniq.model import Detection
+from motioniq.tracking import IdentityTracker
 
 
 def hand(x, detail=None, score=.95):

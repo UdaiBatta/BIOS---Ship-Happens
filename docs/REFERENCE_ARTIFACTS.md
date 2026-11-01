@@ -55,8 +55,8 @@ python -m zipfile -e handoff-assets/ps4-source-video.zip .
 python -m zipfile -e handoff-assets/ps4-demos-and-data.zip .
 python -m zipfile -e handoff-assets/ps4-interactive-replays.zip .
 uv sync --frozen --extra dev --extra viewer
-uv run egohand doctor
-uv run egohand fetch-model
+uv run motioniq doctor
+uv run motioniq fetch-model
 uv run pytest -q
 ```
 

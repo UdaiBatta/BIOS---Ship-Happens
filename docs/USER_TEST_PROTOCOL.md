@@ -14,7 +14,7 @@ Neither test has been run, so there are no results. The protocol is ready to run
 
 **Conditions** (counterbalanced, a different clip interval per condition):
 - **A.** Plain video player.
-- **B.** EgoHand Twin Review workspace.
+- **B.** MOTIONIQ Review workspace.
 
 **Measures:** time per question, correctness, missed events and confidence (1–5). **Report** the sample size, per-person results and no averages beyond the sample.
 

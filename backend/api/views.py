@@ -1,4 +1,4 @@
-"""JSON API for the EgoHand Twin frontend. See docs/BACKEND_API.md for the contract."""
+"""JSON API for the MOTIONIQ frontend. See docs/BACKEND_API.md for the contract."""
 from __future__ import annotations
 
 from functools import wraps
@@ -16,8 +16,8 @@ from django.conf import settings
 from django.http import FileResponse, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from egohand_twin.model import sha256
-from egohand_twin.pipeline import probe
+from motioniq.model import sha256
+from motioniq.pipeline import probe
 
 from . import services
 from .models import ReviewDecision, Run, Video
@@ -189,7 +189,7 @@ def videos(request):
         return {"videos": [v.as_dict() for v in Video.objects.order_by("-created_at")]}
     path = body(request).get("path")
     if not path:
-        raise ApiError("path is required (a file under EGOHAND_MEDIA_ROOTS)")
+        raise ApiError("path is required (a file under MOTIONIQ_MEDIA_ROOTS)")
     return JsonResponse(register_video(services.allowed_media_path(path)).as_dict(), status=201)
 
 
@@ -239,6 +239,20 @@ def video_frame(request, video_id: int, frame_index: int):
     return response
 
 
+@api(("GET",))
+def video_frame_at(request, video_id: int):
+    video = Video.objects.get(pk=video_id)
+    services.assert_video_unchanged(video)
+    time_s = number(request, "time_s")
+    if time_s is None or not math.isfinite(time_s) or time_s < 0:
+        raise ApiError("time_s must be a finite, non-negative number")
+    timestamps = services.video_timestamps(video)
+    if time_s > timestamps[-1]:
+        raise ApiError("time_s outside the video")
+    frame_index = int(timestamps.searchsorted(time_s, side="left"))
+    return {"frame_index": frame_index, "timestamp_s": float(timestamps[frame_index])}
+
+
 # --------------------------------------------------------------------------- runs
 @api(("GET", "POST"))
 def runs(request):
@@ -268,7 +282,7 @@ def runs(request):
     preset = data.get("preset", "recall")
     if preset not in available_presets():  # cheap checks first: no video hashing for a bad request
         raise ApiError(f"preset must be one of {sorted(available_presets())}"
-                       + (" (hybrid needs: uv sync --extra hybrid; egohand fetch-model --rtm)" if preset == "hybrid" else ""))
+                       + (" (hybrid needs: uv sync --extra hybrid; motioniq fetch-model --rtm)" if preset == "hybrid" else ""))
     video = Video.objects.get(pk=video_id)
     services.assert_video_unchanged(video)
     start = field("start_s", float, 0.)
@@ -542,7 +556,7 @@ def run_artifact(request, run_id, name: str):
 @api(("GET",))
 def run_compare(request, run_id):
     """Same-moment flat-vs-3D image at ?t= seconds (cached per frame)."""
-    from egohand_twin.compare import compare, find_frame
+    from motioniq.compare import compare, find_frame
     run = Run.objects.select_related("video").get(pk=run_id)
     directory = run_dir(run)
     t = number(request, "t")
@@ -578,7 +592,7 @@ def frontend(request, name: str = ""):
     filename, content_type = FRONTEND_FILES[name]
     path = settings.FRONTEND_DIR/filename
     if not path.exists():
-        return JsonResponse({"error": f"{filename} not found in EGOHAND_FRONTEND_DIR"}, status=404)
+        return JsonResponse({"error": f"{filename} not found in MOTIONIQ_FRONTEND_DIR"}, status=404)
     response = HttpResponse(path.read_bytes(), content_type=content_type)
     response["Cache-Control"] = "no-cache"
     return response

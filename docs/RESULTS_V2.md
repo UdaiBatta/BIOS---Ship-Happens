@@ -109,7 +109,7 @@ Recall by capture condition. The conditions are a provisional single-annotator `
 
 ## 5. Quality layer (heuristic; thresholds set on the dev interval)
 
-`egohand quality` produces per-frame signals, 1 s windows (*suitable / needs_review / insufficient_evidence*) and a ranked queue. To check it against the labels, each labeled frame is classified using the same matching as above:
+`motioniq quality` produces per-frame signals, 1 s windows (*suitable / needs_review / insufficient_evidence*) and a ranked queue. To check it against the labels, each labeled frame is classified using the same matching as above:
 
 - **missed:** at least one labeled hand not detected;
 - **all matched:** labeled hands present and all detected;
@@ -154,7 +154,7 @@ Stage breakdown, B0 with the packet probe (seconds): probe 1.1, setup 1.0, decod
 
 ## 7. Experimental camera-space lift (assumed lens)
 
-`egohand lift` on the dev B0 run (193 observed hands, 188 lifted, 5 rejected for reprojection RMSE above 25 px):
+`motioniq lift` on the dev B0 run (193 observed hands, 188 lifted, 5 rejected for reprojection RMSE above 25 px):
 
 | Assumed horizontal FOV | Median wrist depth | p5–p95 | Wrist depth in 0.2–0.9 m | Reprojection RMSE (median) | PnP rotation from identity (median) |
 | ---: | ---: | --- | ---: | ---: | ---: |
@@ -203,15 +203,15 @@ The final demo run (`runs/final_demo`, private) was produced by the same command
 V=data/private/mytronlabs-000060-016.mp4
 L=data/private/labels_v2/labels_v2_provisional.json
 T="--detection-threshold .3 --presence-threshold .3 --tracking-threshold .3"
-uv run egohand process $V --out runs/dev_B0 --duration 30 --no-video
-uv run egohand process $V --out runs/dev_chosen --duration 30 --no-video --preset recall      # = --rescue-crop $T
-uv run egohand process $V --out runs/hold_chosen --start-seconds 60 --duration 90 --no-video --preset recall
-uv run egohand identity runs/dev_chosen
-uv run egohand evaluate runs/dev_chosen $L --allow-provisional --split dev --summary
-uv run egohand quality runs/dev_chosen $V --labels $L --allow-provisional --split dev
-uv run egohand export-segments runs/dev_chosen --out runs/dev_chosen_suitable --status suitable
-uv run egohand lift runs/dev_B0 --hfov 120 150 180
-uv run egohand replay $V runs/dev_chosen --out runs/dev_chosen/review.rrd --quality runs/dev_chosen/quality
+uv run motioniq process $V --out runs/dev_B0 --duration 30 --no-video
+uv run motioniq process $V --out runs/dev_chosen --duration 30 --no-video --preset recall      # = --rescue-crop $T
+uv run motioniq process $V --out runs/hold_chosen --start-seconds 60 --duration 90 --no-video --preset recall
+uv run motioniq identity runs/dev_chosen
+uv run motioniq evaluate runs/dev_chosen $L --allow-provisional --split dev --summary
+uv run motioniq quality runs/dev_chosen $V --labels $L --allow-provisional --split dev
+uv run motioniq export-segments runs/dev_chosen --out runs/dev_chosen_suitable --status suitable
+uv run motioniq lift runs/dev_B0 --hfov 120 150 180
+uv run motioniq replay $V runs/dev_chosen --out runs/dev_chosen/review.rrd --quality runs/dev_chosen/quality
 ```
 
 The bake-off scripts used for the tables are wrappers around these commands; the configuration names map to the flags in §2. Runs, labels and recordings stay in `data/` and `runs/`, which are git-ignored and private.
@@ -239,7 +239,7 @@ Idea: MediaPipe finds hands with a palm detector, which misses hidden palms. RTM
 | Full pipeline, `hybrid` | **36/72, precision 36/47** (11 false positives); 170 s vs about 50 s for 30 s with 2 workers |
 | Depth for RTMPose-only hands vs MediaPipe's own 3D (120 MediaPipe hands, 2D fed in) | median 17.4 mm per joint after rigid alignment; a jointed-finger fit was worse (17.7 mm) and 4× slower |
 
-**Rejected as a default.** The hands RTMDet adds are the ones MediaPipe still cannot read inside the box, and its extra boxes create false positives. RTMDet-nano is small and trained mostly on third-person images. The preset stays available, labelled experimental, only to try on other recording families; it is hidden unless `uv sync --extra hybrid` and `egohand fetch-model --rtm` have run.
+**Rejected as a default.** The hands RTMDet adds are the ones MediaPipe still cannot read inside the box, and its extra boxes create false positives. RTMDet-nano is small and trained mostly on third-person images. The preset stays available, labelled experimental, only to try on other recording families; it is hidden unless `uv sync --extra hybrid` and `motioniq fetch-model --rtm` have run.
 
 ## Wrong-hand labels: what was measured (31 Oct 2026)
 

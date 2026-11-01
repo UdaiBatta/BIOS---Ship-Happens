@@ -1,7 +1,7 @@
-"""Database records for the EgoHand Twin backend.
+"""Database records for the MOTIONIQ backend.
 
 The database stores metadata and human decisions only. Hand data stays in the run
-directories written by ``egohand_twin`` (JSONL/CSV/NPZ/manifest), which remain the
+directories written by ``motioniq`` (JSONL/CSV/NPZ/manifest), which remain the
 source of truth; the API reads them through indexed, cached accessors.
 """
 from __future__ import annotations

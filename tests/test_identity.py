@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from egohand_twin.cli import identity_command
-from egohand_twin.identity import write_identity
+from motioniq.cli import identity_command
+from motioniq.identity import write_identity
 
 
 def run_with_landmarks(tmp_path):

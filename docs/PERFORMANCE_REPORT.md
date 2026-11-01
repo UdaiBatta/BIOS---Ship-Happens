@@ -1,4 +1,6 @@
-# Performance report
+# Performance report (historical measurements)
+
+The timing tables below are historical measurements from the environment and runs described here. They have not been reproduced in the current session. Treat them as a baseline, not as current machine performance. The current-session common accuracy is also unmeasured because the local `labels_v2` inputs are missing.
 
 ## Where these numbers come from
 
@@ -27,7 +29,13 @@
 - The `hybrid` p95 is dominated by frames that run RTMDet on four tiles plus RTMPose and the depth fit. Recovery only runs when fewer than two hands are found **and** a recently seen hand is missing.
 - Tracking, smoothing and side logic take 0.27 s for 900 frames (`stage_seconds.track`), so they are negligible next to detection.
 
-## Smoothing (One Euro, default `min_cutoff` 1.7, `beta` 0.03)
+## Current smoothing
+
+The shipped pipeline uses offline Rauch–Tung–Striebel smoothing for the wrist and One Euro smoothing for finger offsets relative to that wrist. It uses future observations, so it is suitable for completed offline runs rather than live, zero-latency tracking. Raw coordinates remain available beside filtered coordinates. Bone-length calibration is also implemented for the generated hand surface.
+
+## Historical smoothing comparison (superseded)
+
+The following One Euro-only measurements describe the earlier smoother and do not characterize the current implementation. They remain here as historical evidence.
 
 Measured on the `recall` dev run, wrist only:
 
@@ -42,4 +50,4 @@ Measured on the `recall` dev run, wrist only:
 
 - **MediaPipe Tasks (Python)** runs on the CPU here and on Windows: its GPU delegate is not available in the Windows Python package.
 - **The RTM models** run with onnxruntime on the CPU. On the laptop, `onnxruntime-gpu` with the CUDA provider could take RTMDet/RTMPose off the CPU. This is untested and needs a matching CUDA/cuDNN install, so it was not changed before the deadline.
-- **Peak VRAM** is therefore 0 for every preset as shipped.
+- **Peak VRAM** is not measured. The shipped configuration selects CPU inference; this is not a GPU-memory measurement.

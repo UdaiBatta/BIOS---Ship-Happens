@@ -1,4 +1,4 @@
-# One-command local setup, tests and launch of EgoHand Twin on Windows (backend + worker + viewer).
+# One-command local setup, tests and launch of MOTIONIQ on Windows (backend + worker + viewer).
 # Usage, from the repository root in PowerShell:
 #   powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1          # set up, then start
 #   powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1 -Test    # set up, run all tests, then start
@@ -10,6 +10,9 @@ Set-Location $Root
 $Clip = Join-Path $Root 'data\private\mytronlabs-000060-016.mp4'
 $Release = 'ps4-baseline-handoff-20261031'
 $Repo = 'UdaiBatta/BIOS---Ship-Happens'
+
+if (-not $env:MOTIONIQ_FFMPEG_DIR -and $env:EGOHAND_FFMPEG_DIR) { $env:MOTIONIQ_FFMPEG_DIR = $env:EGOHAND_FFMPEG_DIR }
+if ($env:MOTIONIQ_FFMPEG_DIR) { $env:Path = "$env:MOTIONIQ_FFMPEG_DIR;$env:Path" }
 
 function Need($name, $hint) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { throw "Missing: $name. $hint" }
@@ -40,17 +43,17 @@ Need ffmpeg 'Install: winget install --id=Gyan.FFmpeg -e   (then open a new Powe
 Need ffprobe 'Install FFmpeg (it provides ffprobe)'
 
 Run 'Installing dependencies' { uv sync --extra dev --extra viewer --extra backend --extra hybrid }
-Run 'Fetching the hand model' { uv run egohand fetch-model | Out-Null }
+Run 'Fetching the hand model' { uv run motioniq fetch-model | Out-Null }
 uv run rerun analytics disable | Out-Null
-uv run egohand fetch-model --rtm | Out-Null
+uv run motioniq fetch-model --rtm | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Host '    (optional RTM hand models not downloaded; the experimental hybrid preset stays hidden)' }
-Run 'Checking the MediaPipe runtime' { uv run egohand doctor | Select-String 'mediapipe_runtime' }
+Run 'Checking the MediaPipe runtime' { uv run motioniq doctor | Select-String 'mediapipe_runtime' }
 
 $HasMedia = (Test-Path (Join-Path $Root 'media')) -and (Get-ChildItem (Join-Path $Root 'media') -Recurse -File -Include *.mp4,*.mov,*.mkv,*.avi,*.m4v,*.webm | Select-Object -First 1)
 if (-not (Test-Path $Clip) -and -not $HasMedia) {
     Write-Host "==> $Clip not found; downloading it from the private release (needs: gh auth login)" -ForegroundColor Cyan
     Need gh "Install GitHub CLI (winget install --id=GitHub.cli -e) and run: gh auth login. Or download ps4-source-video.zip from https://github.com/$Repo/releases/tag/$Release and unzip it here."
-    $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("egohand-" + [guid]::NewGuid())
+    $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("motioniq-" + [guid]::NewGuid())
     New-Item -ItemType Directory $Tmp | Out-Null
     Run 'Downloading ps4-source-video.zip' { gh release download $Release --repo $Repo --dir $Tmp -p ps4-source-video.zip -p SHA256SUMS }
     $Zip = Join-Path $Tmp 'ps4-source-video.zip'
@@ -72,9 +75,9 @@ if ($Test) {
 # A server or worker left over from an earlier launch keeps running OLD code (it does not reload),
 # so it would reject new presets and miss new viewer files. Stop them before starting fresh ones.
 $Old = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match 'manage\.py"?\s+(runserver\s+127\.0\.0\.1:8000|egohand_worker)' })
+    Where-Object { $_.CommandLine -match 'manage\.py"?\s+(runserver\s+127\.0\.0\.1:8000|motioniq_worker)' })
 if ($Old.Count) {
-    Write-Host "==> Stopping $($Old.Count) EgoHand server/worker process(es) from an earlier launch" -ForegroundColor Cyan
+    Write-Host "==> Stopping $($Old.Count) MOTIONIQ server/worker process(es) from an earlier launch" -ForegroundColor Cyan
     $Old | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
 }
@@ -88,11 +91,11 @@ $Media = Join-Path $Root 'media'
 $ToRegister = @()
 if (Test-Path $Clip) { $ToRegister += $Clip }
 if (Test-Path $Media) { $ToRegister += $Media }
-Run 'Registering the clip and every video in media\' { uv run python manage.py egohand_register @ToRegister }
+Run 'Registering the clip and every video in media\' { uv run python manage.py motioniq_register @ToRegister }
 
-Write-Host '==> Starting the worker in a second window (close that window to stop it)' -ForegroundColor Cyan
+Write-Host '==> Starting the worker in the background (rerunning this script restarts it)' -ForegroundColor Cyan
 $Backend = (Get-Location).Path
-Start-Process powershell -ArgumentList '-NoExit', '-Command', "Set-Location '$Backend'; uv run python manage.py egohand_worker --recover"
+Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', "Set-Location '$Backend'; uv run python manage.py motioniq_worker --recover" -RedirectStandardOutput (Join-Path $Root 'data\private\backend\worker.stdout.log') -RedirectStandardError (Join-Path $Root 'data\private\backend\worker.stderr.log')
 if (-not $NoBrowser) {
     Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command', 'Start-Sleep 5; Start-Process http://127.0.0.1:8000/'
 }

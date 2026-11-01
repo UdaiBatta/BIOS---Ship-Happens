@@ -1,9 +1,9 @@
 """Hybrid fusion: duplicates are skipped, recovery is track-gated, crop retry is opt-in."""
 import numpy as np
 
-from egohand_twin.handfit import MEDIAN_HAND
-from egohand_twin.hybrid import HybridDetector
-from egohand_twin.model import Detection
+from motioniq.handfit import MEDIAN_HAND
+from motioniq.hybrid import HybridDetector
+from motioniq.model import Detection
 
 
 def _hand(x, y=.5, size=.08):

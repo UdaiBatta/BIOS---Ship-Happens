@@ -9,6 +9,7 @@ urlpatterns = [
     path("videos/upload", views.upload_video),
     path("videos/scan", views.videos_scan),
     path("videos/<int:video_id>", views.video_detail),
+    path("videos/<int:video_id>/frame-at", views.video_frame_at),
     path("videos/<int:video_id>/frames/<int:frame_index>.jpg", views.video_frame),
     path("runs", views.runs),
     path("runs/<uuid:run_id>", views.run_detail),

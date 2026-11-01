@@ -2,7 +2,7 @@
 
 Usage:  uv run python scripts/evaluate_detection.py LABELS.json RUN:SPLIT [RUN:SPLIT ...]
 
-Wraps `egohand evaluate` (same matching rule: raw observed wrists within 0.10 image diagonals;
+Wraps `motioniq evaluate` (same matching rule: raw observed wrists within 0.10 image diagonals;
 predicted tracks never count). Per-category recall uses the label tags; tags overlap, so the
 categories must not be summed. Labels are provisional until reviewed.
 """
@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import sys
 
-from egohand_twin.evaluation import evaluate
+from motioniq.evaluation import evaluate
 
 
 def detection_metrics(run: str, labels: str, split: str | None) -> dict:

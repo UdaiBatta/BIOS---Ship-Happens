@@ -13,6 +13,6 @@
 - **Upload.** "Upload…" button with a progress display, using the existing private upload folder.
 - **Clear errors.** "not a readable video (FFprobe could not open it)"; "file missing" shown for moved or deleted files; the source duration ("180 s source") is shown separately from the run segment ("60–150 s").
 
-**Path safety (unchanged):** only files under `EGOHAND_MEDIA_ROOTS` or the upload folder can be registered; `..` escapes are refused (403).
+**Path safety (unchanged):** only files under `MOTIONIQ_MEDIA_ROOTS` or the upload folder can be registered; `..` escapes are refused (403).
 
 **Tests:** `backend/api/tests/test_multi_video.py` covers two distinct MP4 files, discovery while running, repeated processing of one video, invalid paths, unsupported uploads, failure recovery, a moved file, and segment validation. Chromium end to end: scan picked up a file added while the page was open, the run list filtered per video, and the run of the selected video loaded.

@@ -1,6 +1,13 @@
 import numpy as np
 
-from egohand_twin.render import RerunSink, composite, hand_label
+from motioniq.render import RerunSink, color, composite, hand_label
+
+
+def test_overlay_keeps_unknown_side_distinct_from_right():
+    assert color({"observed": True, "side": "Left"}) == (38, 89, 217)
+    assert color({"observed": True, "side": "Right"}) == (229, 135, 57)
+    assert color({"observed": True, "side": "unknown"}) == (129, 135, 137)
+    assert color({"observed": False, "side": "Right"}) == (145, 145, 145)
 
 
 def hand(state, observed, reason=None, p=.2):

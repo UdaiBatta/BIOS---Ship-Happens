@@ -1,4 +1,4 @@
-"""Fast, cached access to run outputs written by egohand_twin.
+"""Fast, cached access to run outputs written by motioniq.
 
 Latency design:
 - ``frames_index.npz`` (built once when a run completes) stores the byte offset,
@@ -17,6 +17,8 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+
+from motioniq.ffmpeg import require_tool
 import subprocess
 import threading
 import uuid
@@ -24,6 +26,7 @@ import uuid
 from django.conf import settings
 from django.core.cache import cache
 import numpy as np
+
 
 INDEX_NAME = "frames_index.npz"
 TRACKS_NAME = "tracks.json"
@@ -48,7 +51,7 @@ def allowed_media_path(path: str | Path) -> Path:
             if not resolved.is_file():
                 raise FileNotFoundError(f"Not a file: {resolved.name}")
             return resolved
-    raise PermissionError("Path is outside the allowed media folders (EGOHAND_MEDIA_ROOTS)")
+    raise PermissionError("Path is outside the allowed media folders (MOTIONIQ_MEDIA_ROOTS)")
 
 
 def display_name(path: Path) -> str:
@@ -62,7 +65,7 @@ def display_name(path: Path) -> str:
 
 
 def assert_video_unchanged(video) -> None:
-    from egohand_twin.model import sha256
+    from motioniq.model import sha256
     path = Path(video.path)
     fingerprint = _stamp(path)
     key = f"source-sha:{path}"
@@ -245,7 +248,7 @@ def frame_jpeg(video_path: Path, video_sha: str, frame_index: int, pts_s: float,
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f"{out.stem}.{uuid.uuid4().hex}.tmp.jpg")  # unique per request
     try:
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{pts_s:.6f}", "-i", str(video_path),
+        subprocess.run([require_tool("ffmpeg"), "-v", "error", "-y", "-ss", f"{pts_s:.6f}", "-i", str(video_path),
                         "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(tmp)],
                        check=True, capture_output=True, timeout=60)
         try:
@@ -261,7 +264,7 @@ def frame_jpeg(video_path: Path, video_sha: str, frame_index: int, pts_s: float,
 
 def video_timestamps(video) -> np.ndarray:
     """Per-frame presentation timestamps (relative to the first), probed once per video and cached."""
-    from egohand_twin.pipeline import probe
+    from motioniq.pipeline import probe
     path = settings.DATA_DIR/"timestamps"/f"{video.sha256}.npy"
     key = f"ts:{video.sha256}"
     value = cache.get(key)
@@ -286,7 +289,7 @@ def build_proxy(video_path: Path, out: Path, first_frame: int, last_frame: int,
     actual first selected source timestamp, not the requested seek boundary.
     """
     tmp = out.with_suffix(".tmp.mp4")
-    cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(video_path), "-an", "-vf",
+    cmd = [require_tool("ffmpeg"), "-v", "error", "-y", "-i", str(video_path), "-an", "-vf",
            f"select=between(n\\,{first_frame}\\,{last_frame}),setpts=PTS-STARTPTS,scale={width}:-2",
            "-frames:v", str(last_frame - first_frame + 1), "-fps_mode", "passthrough",
            "-enc_time_base:v", "filter", "-c:v", "libx264",
@@ -294,7 +297,7 @@ def build_proxy(video_path: Path, out: Path, first_frame: int, last_frame: int,
             str(tmp)]
     subprocess.run(cmd, check=True, capture_output=True, timeout=3600)
     tmp.replace(out)
-    count = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+    count = subprocess.run([require_tool("ffprobe"), "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
                             "stream=nb_read_packets", "-of", "csv=p=0", str(out)],
                            check=True, capture_output=True, text=True).stdout.strip()
     return {"path": out.name, "width": width, "frames": int(count), "time_offset_s": time_offset_s,

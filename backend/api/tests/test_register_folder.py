@@ -1,4 +1,4 @@
-"""egohand_register accepts a folder and registers every video in it, skipping bad files."""
+"""motioniq_register accepts a folder and registers every video in it, skipping bad files."""
 from __future__ import annotations
 
 from io import StringIO
@@ -34,7 +34,7 @@ class RegisterFolderTests(TestCase):
 
     def register(self, *paths):
         out, err = StringIO(), StringIO()
-        call_command("egohand_register", *map(str, paths), stdout=out, stderr=err)
+        call_command("motioniq_register", *map(str, paths), stdout=out, stderr=err)
         return out.getvalue(), err.getvalue()
 
     def test_folder_registers_every_video_recursively_and_skips_bad_files(self):

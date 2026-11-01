@@ -1,6 +1,6 @@
 # Privacy flags: status (experimental, not in the viewer)
 
-**Command:** `egohand privacy VIDEO RUN --every 1` → `RUN/privacy_flags.json`.
+**Command:** `motioniq privacy VIDEO RUN --every 1` → `RUN/privacy_flags.json`.
 - **Model:** MediaPipe Face Detector, BlazeFace short range (Apache-2.0, SHA-256 pinned, fetched into the git-ignored `models/`).
 - **Sampling:** one frame per second.
 - **Each flag records:** time, frame, normalised box, score, category `face_candidate`, source and review status.

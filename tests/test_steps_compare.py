@@ -4,9 +4,9 @@ import cv2
 import numpy as np
 import pytest
 
-from egohand_twin.compare import compare, find_frame
-from egohand_twin.model import sha256
-from egohand_twin.steps import load_steps, template, validate_steps, write_template
+from motioniq.compare import compare, find_frame
+from motioniq.model import sha256
+from motioniq.steps import load_steps, template, validate_steps, write_template
 
 FPS = 10
 

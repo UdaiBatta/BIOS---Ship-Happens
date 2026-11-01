@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import pytest
 
-from egohand_twin.annotate import make_annotation_set, parse_intervals
+from motioniq.annotate import make_annotation_set, parse_intervals
 
 
 def test_parse_intervals_validates():
@@ -74,7 +74,7 @@ def _fill(csv_path, decisions):
 
 
 def test_review_pack_and_complete_review_marks_reviewed(tmp_path):
-    from egohand_twin.annotate import apply_label_review, label_review_pack
+    from motioniq.annotate import apply_label_review, label_review_pack
     labels = _labels_file(tmp_path)
     info = label_review_pack(_video(tmp_path), labels, tmp_path/"review")
     assert info == {"frames": 2, "rows": 3, "sheets": 1, "out": str(tmp_path/"review")}
@@ -92,7 +92,7 @@ def test_review_pack_and_complete_review_marks_reviewed(tmp_path):
 
 
 def test_incomplete_or_invalid_review_stays_provisional(tmp_path):
-    from egohand_twin.annotate import apply_label_review, label_review_pack
+    from motioniq.annotate import apply_label_review, label_review_pack
     labels = _labels_file(tmp_path)
     label_review_pack(_video(tmp_path), labels, tmp_path/"review")
     csv_path = tmp_path/"review"/"review.csv"
@@ -116,7 +116,7 @@ def test_incomplete_or_invalid_review_stays_provisional(tmp_path):
 ])
 def test_review_csv_must_have_complete_unambiguous_rows(tmp_path, edit, match):
     import csv
-    from egohand_twin.annotate import apply_label_review, label_review_pack
+    from motioniq.annotate import apply_label_review, label_review_pack
 
     labels = _labels_file(tmp_path)
     label_review_pack(_video(tmp_path), labels, tmp_path/"review")

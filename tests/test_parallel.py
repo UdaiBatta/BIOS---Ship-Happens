@@ -1,6 +1,6 @@
 import pytest
 
-from egohand_twin.parallel import PrecomputedDetector, plan_chunks
+from motioniq.parallel import PrecomputedDetector, plan_chunks
 
 
 def test_chunks_are_contiguous_complete_and_warmed_up():
@@ -28,7 +28,7 @@ def test_precomputed_detector_refuses_missing_frames():
 
 def _det(x):
     import numpy as np
-    from egohand_twin.model import Detection
+    from motioniq.model import Detection
     image = np.zeros((21, 3))
     image[:, 0] = x
     return Detection(image, np.zeros((21, 3)), "Left", .9)
@@ -40,7 +40,7 @@ def test_lookahead_planned_except_last_chunk():
 
 
 def test_merge_repairs_seam_until_chunks_agree():
-    from egohand_twin.parallel import merge_chunks
+    from motioniq.parallel import merge_chunks
     a = {"chunk": 0, "detections": {0: [_det(.1)], 1: [_det(.1)]},
          "lookahead": {2: [_det(.2)], 3: [_det(.3)], 4: [_det(.4)], 5: [_det(.5)]}}
     # The next chunk disagrees on frame 2 (cold MediaPipe state), then agrees from frame 3.
@@ -53,7 +53,7 @@ def test_merge_repairs_seam_until_chunks_agree():
 
 
 def test_merge_reports_unconverged_seam():
-    from egohand_twin.parallel import merge_chunks
+    from motioniq.parallel import merge_chunks
     a = {"chunk": 0, "detections": {0: []}, "lookahead": {1: [_det(.1)], 2: [_det(.2)]}}
     b = {"chunk": 1, "detections": {1: [], 2: [], 3: []}, "lookahead": {}}
     merged, seams = merge_chunks([a, b], agree=2)
@@ -68,7 +68,7 @@ def test_precomputed_detector_reports_worker_latency():
 
 
 def test_lookahead_never_spans_beyond_the_next_chunk_and_merge_survives():
-    from egohand_twin.parallel import merge_chunks
+    from motioniq.parallel import merge_chunks
     plans = plan_chunks(list(range(20)), 4, overlap=2, lookahead=60)  # 5-frame chunks
     assert [p["lookahead"] for p in plans] == [[5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19], []]
     results = [{"chunk": p["chunk"], "detections": {f: [_det(.01*f + .001*p["chunk"])] for f in p["keep"]},
@@ -78,7 +78,7 @@ def test_lookahead_never_spans_beyond_the_next_chunk_and_merge_survives():
 
 
 def test_process_args_raises_value_error_not_system_exit():
-    from egohand_twin.cli import process_args
+    from motioniq.cli import process_args
     with pytest.raises(ValueError):
         process_args(["v.mp4", "--out", "o", "--preset", "nonsense"])
     with pytest.raises(ValueError, match="workers"):
@@ -91,7 +91,7 @@ def test_backward_pass_runs_segments_in_reverse_with_warmup(monkeypatch):
     """Each segment is detected newest-first, warmed up on the frames after it, and only kept
     frames are recorded; reverse timestamps increase strictly within each detector."""
     import argparse
-    from egohand_twin import parallel
+    from motioniq import parallel
     calls = []
 
     class Fake:
@@ -106,7 +106,7 @@ def test_backward_pass_runs_segments_in_reverse_with_warmup(monkeypatch):
 
         def close(self):
             pass
-    monkeypatch.setattr("egohand_twin.pipeline.build_detector", lambda args: Fake())
+    monkeypatch.setattr("motioniq.pipeline.build_detector", lambda args: Fake())
     keep = set(range(0, 10))
     bp = parallel.BackwardPass(argparse.Namespace(), keep, segment=4, warmup=2)
     for i in range(12):  # frames 10, 11 are the chunk's lookahead (warm-up only)
@@ -120,8 +120,8 @@ def test_backward_pass_runs_segments_in_reverse_with_warmup(monkeypatch):
 
 def test_add_backward_adds_only_missing_non_duplicate_hands():
     import numpy as np
-    from egohand_twin.model import Detection
-    from egohand_twin.parallel import add_backward
+    from motioniq.model import Detection
+    from motioniq.parallel import add_backward
 
     def hand(x):  # a hand-sized spread of landmarks around x
         image = np.zeros((21, 3))
@@ -135,6 +135,66 @@ def test_add_backward_adds_only_missing_non_duplicate_hands():
 
 
 def test_accurate_preset_enables_the_backward_pass():
-    from egohand_twin.cli import process_args
+    from motioniq.cli import process_args
     assert process_args(["v.mp4", "--out", "o", "--preset", "accurate"]).bidirectional is True
     assert not process_args(["v.mp4", "--out", "o", "--preset", "recall"]).bidirectional
+
+
+def test_accurate_crop_rescue_does_not_buffer_unused_full_frames(monkeypatch):
+    """Crop rescue uses the same RGB/timestamp inputs without retaining source-resolution BGR."""
+    import numpy as np
+    from motioniq import parallel
+    from motioniq.model import CropRescueDetector, MultiViewDetector
+
+    buffered = []
+    detectors = []
+
+    class CropSpy(CropRescueDetector):
+        def __init__(self):
+            self.inputs = []
+            detectors.append(self)
+
+        def detect(self, rgb, timestamp_s, full_bgr=None):
+            self.inputs.append((int(rgb[0, 0, 0]), round(timestamp_s, 6), full_bgr))
+            return [int(rgb[0, 0, 0])]
+
+        def close(self):
+            pass
+
+    class Capture:
+        def __init__(self):
+            self.index = 0
+
+        def read(self):
+            if self.index == 4:
+                return False, None
+            frame = np.full((2, 2, 3), self.index, dtype=np.uint8)
+            self.index += 1
+            return True, frame
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr("motioniq.pipeline.build_detector", lambda args: CropSpy())
+    monkeypatch.setattr(parallel.cv2, "VideoCapture", lambda path: Capture())
+    original_add = parallel.BackwardPass.add
+
+    def capture_buffer(self, index, rgb, timestamp, full_bgr=None):
+        buffered.append(full_bgr)
+        return original_add(self, index, rgb, timestamp, full_bgr)
+
+    monkeypatch.setattr(parallel.BackwardPass, "add", capture_buffer)
+    result = parallel._detect_chunk({
+        "args": {"max_width": 2, "bidirectional": True}, "keep": [0, 1, 2],
+        "warmup": [], "lookahead": [3], "chunk": 0, "video": "synthetic",
+        "timestamps": [10 + i / 30 for i in range(4)],
+    })
+
+    assert buffered == [None] * 4  # no full-resolution BGR references enter the backward buffer
+    assert [d.inputs for d in detectors] == [
+        [(i, round(i / 30, 6), None) for i in range(4)],
+        [(3 - i, round(i / 30, 6), None) for i in range(4)],
+    ]
+    assert result["detections"] == {0: [0], 1: [1], 2: [2]}
+    assert result["backward"] == {0: [0], 1: [1], 2: [2]}
+    assert parallel._needs_full_bgr(MultiViewDetector.__new__(MultiViewDetector))

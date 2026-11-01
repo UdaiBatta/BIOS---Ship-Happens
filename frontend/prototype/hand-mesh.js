@@ -1,7 +1,6 @@
-/* EgoHand Twin: an anatomically shaped low-poly hand surface generated from the 21 lifted 3D joints.
+/* MOTIONIQ: an anatomically shaped low-poly hand surface generated from 21 observed 3D joints.
  *
- * What it is: a procedural skin placed exactly on the camera-space joints the pipeline lifted
- * (lift_*.npz):
+ * A procedural skin for camera-space joints or illustrative hand-relative posture:
  *  - finger segments: 8-sided tubes that taper towards the tip, narrow slightly between joints
  *    (so knuckles read as bulges) and close with rounded caps; fingertips end at the tip landmark;
  *  - thumb: its own thicker segments from the carpometacarpal joint, following the thumb joints;
@@ -18,7 +17,7 @@
  * change per frame. Every part is a closed surface wound outward (checked by tests for left and right
  * hands), so the viewer's back-face culling and Lambert shading work.
  * Budget: 1,872 triangles and 970 vertices per hand.
- * Works in the browser (window.EgoHandMesh) and in Node (module.exports) for tests.
+ * Works in the browser (window.MotionIQMesh) and in Node (module.exports) for tests.
  */
 (function (root) {
   'use strict';
@@ -161,6 +160,10 @@
     for (let i = 1; i < 21; i++) L[i] = median(jointSets.map((j) => len(sub(j[i], j[PARENT[i]]))));
     return L;
   }
+  function profile(jointSets) {
+    const valid = jointSets.filter(validJoints);
+    return valid.length ? { lengths: boneLengths(valid), scale: median(valid.map(palmScale)) } : null;
+  }
   /** Joints with calibrated lengths: each bone keeps this frame's DIRECTION, gets the track's median LENGTH. */
   function calibrate(joints, L) {
     const out = new Array(21); out[0] = joints[0].slice(0, 3);
@@ -197,7 +200,7 @@
     return PARTS.map(([, , partFaces]) => signedVolume(v, partFaces));
   }
 
-  const api = { build, forHands, partVolumes, calibrate, boneLengths, FACES, VERTEX_COUNT, BONES };
+  const api = { build, forHands, partVolumes, calibrate, boneLengths, profile, FACES, VERTEX_COUNT, BONES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.EgoHandMesh = api;
+  else root.MotionIQMesh = api;
 })(typeof window !== 'undefined' ? window : globalThis);

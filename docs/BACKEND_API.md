@@ -1,17 +1,17 @@
-# EgoHand Twin backend API (v1)
+# MOTIONIQ backend API (v1)
 
-A Django service that wraps the `egohand_twin` pipeline for the frontend. It runs locally and is private: it reads restricted factory footage, so it binds to 127.0.0.1, serves only files under allowed folders, and can require a token.
+A Django service that wraps the `motioniq` pipeline for the frontend. It runs locally and is private: it reads restricted factory footage, so it binds to 127.0.0.1, serves only files under allowed folders, and can require a token.
 
 ## Run it
 
 ```sh
 uv sync --extra dev --extra viewer --extra backend
-uv run egohand fetch-model
+uv run motioniq fetch-model
 cd backend
 uv run python manage.py migrate
-uv run python manage.py egohand_register ../media             # every video in a folder (or list files)
+uv run python manage.py motioniq_register ../media             # every video in a folder (or list files)
 uv run python manage.py runserver 127.0.0.1:8000           # API
-uv run python manage.py egohand_worker --recover           # job worker (second terminal)
+uv run python manage.py motioniq_worker --recover           # job worker (second terminal)
 ```
 
 Then open **http://127.0.0.1:8000/** for the viewer (`frontend/prototype/index.html`, served by Django with `backend-connector.js`). Choose a completed run and click **Load run**, or queue a new one with **Process**.
@@ -22,21 +22,21 @@ Environment variables (all optional):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `EGOHAND_MEDIA_ROOTS` | `<repo>/data/private` and `<repo>/media` | Folders from which videos may be registered and served, separated by `;` on Windows or `:` on Unix |
-| `EGOHAND_UPLOAD_DIR` | `<repo>/data/private/uploads` | Dedicated trusted upload folder; uploads work even when media roots point elsewhere |
-| `EGOHAND_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Frontend dev origins allowed by CORS |
-| `EGOHAND_API_TOKEN` | empty (no auth) | If set, send `Authorization: Bearer <token>`. For `<video src>` and `<img src>`, append `?token=<token>`. `/api/health` stays open. |
-| `EGOHAND_RUNS_DIR` | `<repo>/runs/backend` | Where run outputs are written |
-| `EGOHAND_DATA_DIR` | `<repo>/data/private/backend` | Database, frame-image cache, timestamp cache |
-| `EGOHAND_GOVERNANCE_FILE` | empty | `governance.json` passed to every run (consent, retention, lens source) |
-| `EGOHAND_MAX_FRAMES_PER_REQUEST` | 600 | Upper limit for `/frames` pages |
-| `EGOHAND_LIFT_HFOV` | 150 | Horizontal FOV for the EXPERIMENTAL assumed-lens lift the worker writes for the viewer's camera-space panel; empty disables it |
-| `EGOHAND_FRONTEND_DIR` | `<repo>/frontend/prototype` | Folder of the viewer page served at `/` |
+| `MOTIONIQ_MEDIA_ROOTS` | `<repo>/data/private` and `<repo>/media` | Folders from which videos may be registered and served, separated by `;` on Windows or `:` on Unix |
+| `MOTIONIQ_UPLOAD_DIR` | `<repo>/data/private/uploads` | Dedicated trusted upload folder; uploads work even when media roots point elsewhere |
+| `MOTIONIQ_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173` | Frontend dev origins allowed by CORS |
+| `MOTIONIQ_API_TOKEN` | empty (no auth) | If set, send `Authorization: Bearer <token>`. For `<video src>` and `<img src>`, append `?token=<token>`. `/api/health` stays open. |
+| `MOTIONIQ_RUNS_DIR` | `<repo>/runs/backend` | Where run outputs are written |
+| `MOTIONIQ_DATA_DIR` | `<repo>/data/private/backend` | Database, frame-image cache, timestamp cache |
+| `MOTIONIQ_GOVERNANCE_FILE` | empty | `governance.json` passed to every run (consent, retention, lens source) |
+| `MOTIONIQ_MAX_FRAMES_PER_REQUEST` | 600 | Upper limit for `/frames` pages |
+| `MOTIONIQ_LIFT_HFOV` | 150 | Horizontal FOV for the EXPERIMENTAL assumed-lens lift the worker writes for the viewer's camera-space panel; empty disables it |
+| `MOTIONIQ_FRONTEND_DIR` | `<repo>/frontend/prototype` | Folder of the viewer page served at `/` |
 
 ## Conventions
 
 - **JSON:** everything is JSON except media. JSON request bodies require `Content-Type: application/json` (a charset is allowed); uploads use multipart. Errors are `{"error": "..."}` with status 400 (bad input), 401 (token), 403 (path or request origin not allowed), 404 (not found), 405 (method), 409 (not ready or unsafe run output path), 415 (wrong JSON content type), or 503 (run output deletion failed; retry).
-- **Browser writes:** POST, PUT, PATCH and DELETE under `/api/` accept the service's own origin or an origin in `EGOHAND_CORS_ORIGINS`. Cross-site browser requests without an `Origin` are rejected. CLI requests without browser origin headers remain supported.
+- **Browser writes:** POST, PUT, PATCH and DELETE under `/api/` accept the service's own origin or an origin in `MOTIONIQ_CORS_ORIGINS`. Cross-site browser requests without an `Origin` are rejected. CLI requests without browser origin headers remain supported.
 - **Time:** times are seconds on the **run time base**: seconds since the first presentation timestamp of the source video, the same as `timestamp_s` in frames. The proxy starts at the first selected source frame, so `run_time = run.proxy.time_offset_s + video.currentTime`. For fractional requested starts this offset can differ from `run.start_s`; use the persisted proxy metadata.
 - **Source integrity:** a registered path keeps its original content identity. If its size or modification time changes, the service rechecks the SHA-256 before reading or processing it. Changed content returns 409; restore the original file or register the new content at a new path. Cached integrity checks assume local files are not changed while preserving both size and modification time. Existing completed proxies remain available independently of the original source.
 - **Image coordinates:** `image_xyz` x and y are normalized to the frame (0–1). To draw on a `<video>` element, multiply by the displayed video width and height (keep the aspect ratio; the proxy is 960 px wide, 16:9 for the official clips). z is model depth, not metric.
@@ -98,8 +98,8 @@ Everything below needs `status == complete` (409 before that).
 | `GET /api/runs/<id>/frames/<frame_index>` | `detail=full\|lite` | One frame record |
 
 - **Lite frame:** `{frame_index, timestamp_s, quality: {blur_laplacian_var, mean_luma, masks}, hands: [{track_id, state, observed, side, side_probability_right_smoothed, anatomical_side, detection_origin, missing_reason, seconds_since_observed, image_xyz (21×3 | null), world_xyz_m (21×3 | null)}]}`. Values are rounded to 4 decimals.
-- **Full frame:** the unchanged `landmarks.jsonl` record, including raw values, provenance and `missing_reason_basis`. It validates against `src/egohand_twin/schemas/egohand_twin_frame.schema.json`.
-- **Landmark order:** MediaPipe 21-point order (0 wrist; 4, 8, 12, 16, 20 fingertips). Bones are listed in `egohand_twin.model.CONNECTIONS`.
+- **Full frame:** the unchanged `landmarks.jsonl` record, including raw values, provenance and `missing_reason_basis`. It validates against `src/motioniq/schemas/motioniq_frame.schema.json`.
+- **Landmark order:** MediaPipe 21-point order (0 wrist; 4, 8, 12, 16, 20 fingertips). Bones are listed in `motioniq.model.CONNECTIONS`.
 - **Suggested client pattern:** fetch 2–5 s windows ahead of the playhead and look up the nearest `timestamp_s` for each `requestVideoFrameCallback`.
 
 ### Timeline, quality and review
@@ -141,3 +141,5 @@ Quality statuses are **heuristic, task-specific** assessments. `insufficient_evi
 - Meshes, robot export, world/factory coordinates.
 - Privacy detection.
 - User accounts. Use the shared token on a trusted machine only. **Do not expose this service on a public interface.**
+
+`GET /api/videos/<id>/frame-at?time_s=<seconds>` resolves a still-preview start to the first source frame at or after that time. It returns `frame_index` and the source-relative `timestamp_s`; invalid or out-of-range times return 400. This uses presentation timestamps for variable-frame-rate sources.

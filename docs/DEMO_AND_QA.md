@@ -1,6 +1,6 @@
 # Five-minute demo, slide outline and judges' Q&A
 
-**Second user story: expert knowledge capture.** "Half the shop lives in one person's head." Record an expert once, then let others replay the hand motion, add step markers and notes, and look at the same moment from three 3D viewpoints (`egohand compare`, `--steps`). EgoHand Twin *complements* setup sheets, ERP and cross-training; it does not replace them. Whether the 3D view helps people describe a hand action better than plain video is **not yet measured** (test below).
+**Second user story: expert knowledge capture.** "Half the shop lives in one person's head." Record an expert once, then let others replay the hand motion, add step markers and notes, and look at the same moment from three 3D viewpoints (`motioniq compare`, `--steps`). MOTIONIQ *complements* setup sheets, ERP and cross-training; it does not replace them. Whether the 3D view helps people describe a hand action better than plain video is **not yet measured** (test below).
 
 **User story:** a data engineer preparing factory demonstrations for hand-motion analysis or robotics research needs to know which intervals hold usable hand motion, where reconstruction failed, and what to inspect first, with every result traceable to source frames.
 
@@ -17,7 +17,7 @@
 | 0:30–1:15 | Rerun: video + hand-relative 3D, pause at about 6 s and orbit | "21 landmarks per hand and hand-relative 3D in meters. Spacing between hands in the 3D panel is for display only." |
 | 1:15–2:00 | Same seconds: B0 vs chosen detector | "Out of the box, MediaPipe found about a quarter of labeled visible hands. Lower thresholds plus a center crop found half on a held-out interval, with 39 of 40 detections correct. The labels are provisional." |
 | 2:00–3:00 | Quality time series + review-queue log; jump to the top item (12–17 s) | "Each one-second window says *suitable*, *needs review* or *insufficient evidence*, with the reasons. The top item, 12–17 s, has hands observed in 30–73% of frames per window (below 50% in four of five windows), missing-track gaps of 0.53–0.73 s, side changes in three windows and fast camera motion (44% of frame width per second) at 16 s. These values come from the final demo run `runs/final_demo` (`--preset recall`). Insufficient evidence means *no observed hand*, not *no hand*." |
-| 2:45–3:00 | `egohand compare` image at 6 s: flat frame vs front/side/top 3D views of each hand | "Same instant, flat video vs 3D. The side view shows how flat the hand on the slab is. Hidden joints are the model's estimate, and this frame also shows a side error: the hand on the slab is labeled Right with p=0.57." |
+| 2:45–3:00 | `motioniq compare` image at 6 s: flat frame vs front/side/top 3D views of each hand | "Same instant, flat video vs 3D. The side view shows how flat the hand on the slab is. Hidden joints are the model's estimate, and this frame also shows a side error: the hand on the slab is labeled Right with p=0.57." |
 | 3:00–3:30 | A predicted/lost interval | "Predictions are short, 2D only and grey; lost tracks have no coordinates. None of it counts as a detection." |
 | 3:30–4:10 | `review_queue.csv`, `export-segments --status suitable`, segment manifest | "The engineer exports only suitable intervals. Every record keeps raw values, states, source hash, run id and frame range." |
 | 4:10–4:40 | Results table (holdout) + one unresolved failure (hands gripping the slab edge at the bottom: 7/23 recovered) | "This is what we measured, with denominators. This failure remains." |
@@ -25,9 +25,9 @@
 
 ## Pitch line and positioning
 
-> "When half the shop lives in one person's head, EgoHand Twin records what their hands actually do — lets anyone replay it from any angle — and tells a data team which seconds are usable, uncertain or missing."
+> "When half the shop lives in one person's head, MOTIONIQ records what their hands actually do — lets anyone replay it from any angle — and tells a data team which seconds are usable, uncertain or missing."
 
-- EgoHand Twin **complements** ERP, setup sheets and cross-training; it never replaces them.
+- MOTIONIQ **complements** ERP, setup sheets and cross-training; it never replaces them.
 - The second market is robot-learning data teams. Name its limits: no robot export, no retargeting, not robot-tested, hand-relative coordinates.
 - Lead with replay and evidence, not dashboards. Use worker-friendly language: knowledge capture, not monitoring.
 

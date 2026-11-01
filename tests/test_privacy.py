@@ -6,12 +6,12 @@ import cv2
 import numpy as np
 import pytest
 
-from egohand_twin.privacy import FACE_MODEL_SHA256, scan_privacy
+from motioniq.privacy import FACE_MODEL_SHA256, scan_privacy
 
 MODEL = Path(__file__).resolve().parents[1]/"models"/"blaze_face_short_range.tflite"
 
 
-@pytest.mark.skipif(not MODEL.exists(), reason="face model not fetched (egohand privacy fetches it)")
+@pytest.mark.skipif(not MODEL.exists(), reason="face model not fetched (motioniq privacy fetches it)")
 def test_blank_video_gives_no_flags_and_declares_scope(tmp_path):
     import hashlib
     assert hashlib.sha256(MODEL.read_bytes()).hexdigest() == FACE_MODEL_SHA256

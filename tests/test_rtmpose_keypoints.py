@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from egohand_twin.hybrid import RtmHand
+from motioniq.hybrid import RtmHand
 
 MODELS = Path(__file__).resolve().parents[1]/"models"/"rtm"
 
@@ -42,5 +42,5 @@ def test_order_was_verified_against_mediapipe():
     # Recorded verification (docs/HYBRID_TRACKING_AUDIT.md section 4): on 60 confident MediaPipe hands
     # every RTMPose joint landed nearest the same-numbered MediaPipe joint (21/21). The pipeline
     # therefore uses RTMPose points without remapping; this test guards that no remap was added.
-    import egohand_twin.hybrid as h
+    import motioniq.hybrid as h
     assert not hasattr(h, "RTMPOSE_TO_MEDIAPIPE")

@@ -116,6 +116,18 @@
   #p-video { grid-area: video; } #p-three { grid-area: three; } #p-lanes { grid-area: lanes; }
   #p-signals { grid-area: signals; } #p-inspect { grid-area: side1; } #p-events { grid-area: side2; }
   #p-export { grid-area: side3; }
+  /* Frame details changes on every frame (1 or 2 hands, notes, wrapped values). In the wide layout it must not
+     size the row it shares with the video and 3D panels, or the timeline below jumps during playback:
+     contain: size makes the grid ignore its content height, the panel stretches to the row and scrolls inside. */
+  /* "not ... (max-width)" is the exact complement of the narrow layout below, so fractional widths (zoom, display
+     scaling) between 1250 and 1251 px are covered too. Applies in every workspace (in Analysis it shares the
+     timeline's row). */
+  @media not all and (max-width: 1250px) {
+    #p-inspect { contain: size; align-self: stretch; min-height: 0; }
+    #inspector { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  }
+  /* Narrow layout: a fixed height, so the panels below it do not move either. */
+  @media (max-width: 1250px) { #inspector { height: 460px; overflow-y: auto; scrollbar-gutter: stable; } }
 
   .stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--page); border-radius: 6px; overflow: hidden; }
   .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -157,7 +169,10 @@
   .tooltip .row b { font-weight: 600; }
   .tooltip .row .lab { color: var(--ink-2); }
 
-  table.inspect { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+  table.inspect { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; table-layout: fixed; }
+  table.inspect td, table.inspect th { overflow-wrap: break-word; }
+  table.inspect td.k, table.inspect th:first-child { width: 42%; }
+  table.inspect.hands td.k, table.inspect.hands th:first-child { width: 30%; }
   table.inspect th, table.inspect td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--grid); vertical-align: top; }
   table.inspect th { color: var(--muted); font-weight: 500; }
   table.inspect td.k { color: var(--ink-2); }
@@ -1361,13 +1376,18 @@ function jumpEvent(types, dir) {
   seek(t); if (S.view && (t < S.view.t0 || t > S.view.t1)) { const span = S.view.t1 - S.view.t0; setView(t - span / 2, t + span / 2); }
 }
 function renderInspector() {
-  const f = S.frames[S.idx], box = $('inspector'); box.replaceChildren(); if (!f) return;
+  const box = $('inspector'), keep = box.scrollTop;   // redrawn every frame: keep the reader's scroll position
+  renderInspectorBody(box);
+  box.scrollTop = keep;
+}
+function renderInspectorBody(box) {
+  const f = S.frames[S.idx]; box.replaceChildren(); if (!f) return;
   if (!inData(S.t)) { box.append(el('p', { class: 'note' }, 'No run data at this time (outside the loaded run’s time range).')); return; }
   const q = f.quality || {}, m = q.masks || {};
   const t1 = el('table', { class: 'inspect' }), tb1 = el('tbody');
   const kv = (k, v, cls) => { const tr = el('tr'); tr.append(el('td', { class: 'k' }, k)); const td = el('td', cls ? { class: cls } : {}, v); tr.append(td); tb1.append(tr); };
   kv('Frame · time', `${f.frame_index} · ${fmtT(f.timestamp_s)}`);
-  if (S.avail.blur) kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : String(q.blur_laplacian_var));
+  if (S.avail.blur) kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : num(q.blur_laplacian_var, q.blur_laplacian_var < 10 ? 1 : 0));
   for (const [k, lab] of [['hand_observed', 'Hand observed'], ['low_blur', 'Low blur'], ['cam_space_valid', 'Camera lift accepted']])
     if (k === 'hand_observed' || S.lanes.some((L) => L.key === k)) kv(lab, m[k] === true ? '✓ yes' : m[k] === false ? '✕ no' : 'n/a', m[k] === true ? 'ok' : m[k] === false ? 'bad' : 'na');
   t1.append(tb1); box.append(t1);
@@ -1376,11 +1396,11 @@ function renderInspector() {
   const hands = (f.hands || []).filter((h) => h.state !== 'retired' && h.state !== 'lost');
   const lostNote = (f.hands || []).filter((h) => h.state === 'lost')
     .map((h) => `#${h.track_id} ${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} (${num(h.seconds_since_observed, 1)} s)`).join(', ');
-  const t2 = el('table', { class: 'inspect' }); t2.style.marginTop = '10px';
+  const t2 = el('table', { class: 'inspect hands' }); t2.style.marginTop = '10px';
   const head = el('tr'); head.append(el('th', {}, 'Field')); for (const h of hands) { const th = el('th'); const d = el('span', { class: 'dot' }); d.style.background = COLOR[h.anatomical_side] || COLOR.other; th.append(d, document.createTextNode(`${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} #${h.track_id}`)); head.append(th); }
   const tb = el('tbody'); t2.append(el('thead'), tb); t2.tHead.append(head);
-  if (lostNote) box.append(el('p', { class: 'note' }, `Lost tracks (not visible, kept for re-identification): ${lostNote}`));
-  if (!hands.length) { box.append(el('p', { class: 'note' }, 'No hands in this frame.')); return; }
+  const lostP = lostNote ? el('p', { class: 'note' }, `Lost tracks (not visible, kept for re-identification): ${lostNote}`) : null;
+  if (!hands.length) { box.append(el('p', { class: 'note' }, 'No hands in this frame.')); if (lostP) box.append(lostP); return; }
   const rows = [
     ['State', null, (h) => h.state], ['Detected by', null, (h) => h.detection_origin ? h.detection_origin.replace(/_/g, ' ') : '—'],
     ['Wrist depth', 'wristDepth', (h) => wristDepth(h) == null ? '—' : num(wristDepth(h), 3) + ' m'],
@@ -1397,6 +1417,7 @@ function renderInspector() {
   ];
   for (const [lab, need, fn] of rows) { if (need && !S.avail[need]) continue; const tr = el('tr'); tr.append(el('td', { class: 'k' }, lab)); for (const h of hands) tr.append(el('td', {}, fn(h))); tb.append(tr); }
   box.append(t2);
+  if (lostP) box.append(lostP);
   box.append(el('p', { class: 'prov' }, 'Side score is classifier support for left/right, not landmark accuracy. Provenance: measured = timestamps and image stats; predicted = model output; inferred = geometry and rules (camera-space 3D, grip aperture, side).'));
 }
 const SEV = { good: { sym: '●', col: COLOR.good, text: 'recovered' }, info: { sym: '○', col: COLOR.muted, text: 'info' }, warn: { sym: '▲', col: COLOR.warning, text: 'problem' } };

@@ -6,7 +6,6 @@ import importlib.metadata
 import json
 from pathlib import Path
 import platform
-import shutil
 import subprocess
 import time
 
@@ -20,10 +19,11 @@ from .model import COORDINATES, MODEL_URL, CropRescueDetector, Detector, MultiVi
 from .render import RerunSink, VideoSink, composite
 from .smoothing import smooth_samples
 from .tracking import IdentityTracker, baseline_records
+from .tools import require
 
 
 def _ffprobe_json(path: Path, *extra: str) -> dict:
-    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", *extra,
+    result = subprocess.run([require("ffprobe"), "-v", "error", "-select_streams", "v:0", *extra,
                              "-of", "json", str(path)], check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -61,8 +61,7 @@ def probe(path: Path, timestamp_source: str = "auto", check_frames: int = 48):
     to ``frames`` on any disagreement. The pipeline additionally fails if more
     frames decode than timestamps exist.
     """
-    if not shutil.which("ffprobe"):
-        raise RuntimeError("FFprobe is required for source presentation timestamps")
+    require("ffprobe")   # finds it outside PATH too (Windows shells opened before the install)
     stream = _ffprobe_json(path, "-show_entries",
                            "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames")["streams"][0]
     timestamps, source, note = None, "frames", None

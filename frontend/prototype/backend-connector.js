@@ -286,7 +286,7 @@
         ? ' (still queued: is the worker running? manage.py egohand_worker)' : '';
       status(`run ${run.id.slice(0, 8)}: ${current.stage} ${(current.progress * 100).toFixed(0)}%${waiting}`);
       if (current.status === 'complete') { await refresh(run.id); await loadRun(run.id); return; }
-      if (['failed', 'cancelled'].includes(current.status)) { toast(`Run ${current.status}: ${current.error || ''}`); return; }
+      if (['failed', 'cancelled'].includes(current.status)) { status(`run ${run.id.slice(0, 8)} ${current.status}`); toast(`Run ${current.status}: ${current.error || ''}`); return; }
     }
   }
 

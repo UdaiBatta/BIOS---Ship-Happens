@@ -25,6 +25,8 @@ from django.conf import settings
 from django.core.cache import cache
 import numpy as np
 
+from egohand_twin.tools import require
+
 INDEX_NAME = "frames_index.npz"
 TRACKS_NAME = "tracks.json"
 LITE_HAND_KEYS = ("track_id", "state", "observed", "side", "side_probability_right_smoothed",
@@ -245,7 +247,7 @@ def frame_jpeg(video_path: Path, video_sha: str, frame_index: int, pts_s: float,
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f"{out.stem}.{uuid.uuid4().hex}.tmp.jpg")  # unique per request
     try:
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{pts_s:.6f}", "-i", str(video_path),
+        subprocess.run([require("ffmpeg"), "-v", "error", "-y", "-ss", f"{pts_s:.6f}", "-i", str(video_path),
                         "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(tmp)],
                        check=True, capture_output=True, timeout=60)
         try:
@@ -286,7 +288,7 @@ def build_proxy(video_path: Path, out: Path, first_frame: int, last_frame: int,
     actual first selected source timestamp, not the requested seek boundary.
     """
     tmp = out.with_suffix(".tmp.mp4")
-    cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(video_path), "-an", "-vf",
+    cmd = [require("ffmpeg"), "-v", "error", "-y", "-i", str(video_path), "-an", "-vf",
            f"select=between(n\\,{first_frame}\\,{last_frame}),setpts=PTS-STARTPTS,scale={width}:-2",
            "-frames:v", str(last_frame - first_frame + 1), "-fps_mode", "passthrough",
            "-enc_time_base:v", "filter", "-c:v", "libx264",
@@ -294,7 +296,7 @@ def build_proxy(video_path: Path, out: Path, first_frame: int, last_frame: int,
             str(tmp)]
     subprocess.run(cmd, check=True, capture_output=True, timeout=3600)
     tmp.replace(out)
-    count = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+    count = subprocess.run([require("ffprobe"), "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
                             "stream=nb_read_packets", "-of", "csv=p=0", str(out)],
                            check=True, capture_output=True, text=True).stdout.strip()
     return {"path": out.name, "width": width, "frames": int(count), "time_offset_s": time_offset_s,

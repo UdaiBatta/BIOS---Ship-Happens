@@ -6,7 +6,6 @@ import importlib.metadata
 import json
 from pathlib import Path
 import platform
-import shutil
 import sys
 
 import cv2
@@ -27,6 +26,7 @@ from .model import fetch_model, sha256
 from .parallel import process_parallel
 from .pipeline import probe
 from .render import fit_image, text, rebuild_replay
+from .tools import tool
 
 
 PRESETS = {
@@ -72,7 +72,7 @@ def doctor(args):
                       "python": platform.python_version(), "logical_cpus": psutil.cpu_count(),
                       "ram_gb": round(psutil.virtual_memory().total/1024**3, 2),
                       "backend": "MediaPipe CPU (GPU acceleration not assumed)",
-                      "ffmpeg": shutil.which("ffmpeg"), "ffprobe": shutil.which("ffprobe"),
+                      "ffmpeg": tool("ffmpeg"), "ffprobe": tool("ffprobe"),
                       "packages": packages, "mediapipe_runtime": mediapipe_runtime(),
                       "notes": ["Disable Rerun usage analytics for offline use: uv run rerun analytics disable"]},
                      indent=2))

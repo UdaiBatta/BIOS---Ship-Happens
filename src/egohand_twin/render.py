@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-import shutil
 import subprocess
 
 import cv2
 import numpy as np
 
 from .model import CONNECTIONS, sha256
+from .tools import tool
 
 BG, PANEL, TEXT, MUTED = (20, 16, 12), (34, 29, 23), (240, 238, 225), (160, 151, 136)
 
@@ -127,10 +127,10 @@ def composite(frame, sample, subtitle="FACTORY POV  /  MEDIAPIPE HAND LANDMARKER
 
 class VideoSink:
     def __init__(self, path: Path, fps: float):
-        if not shutil.which("ffmpeg"):
+        if not tool("ffmpeg"):
             raise RuntimeError("FFmpeg is required for H.264 previews; install it or use --no-video")
         self.process = subprocess.Popen([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1600x900", "-r", str(fps),
             "-i", "pipe:0", "-an", "-c:v", "libx264", "-preset", "veryfast",
             "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path),

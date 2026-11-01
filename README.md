@@ -46,7 +46,7 @@ It installs dependencies, registers every video in `media/` (and the handoff cli
 Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, a laptop CPU.
 - **Linux:** MediaPipe also needs `libgles2 libegl1`.
 - **macOS:** `brew install ffmpeg`.
-- **Windows:** put FFmpeg on PATH.
+- **Windows:** `winget install --id=Gyan.FFmpeg -e`. The backend also finds FFmpeg from windows opened before the install (registry PATH, winget, Chocolatey, Scoop, `C:\ffmpeg\bin`). Otherwise set `EGOHAND_FFMPEG_DIR` to the folder containing `ffprobe.exe`. The worker prints where it found both tools when it starts.
 
 ```sh
 uv sync --extra dev --extra viewer

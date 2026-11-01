@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-import shutil
 import subprocess
 
 import cv2
 import numpy as np
 
 from .model import CONNECTIONS, sha256
+from .ffmpeg import require_tool
 
 BG, PANEL, TEXT, MUTED = (20, 16, 12), (34, 29, 23), (240, 238, 225), (160, 151, 136)
 
@@ -16,7 +16,7 @@ BG, PANEL, TEXT, MUTED = (20, 16, 12), (34, 29, 23), (240, 238, 225), (160, 151,
 def color(hand):
     if not hand["observed"]:
         return (145, 145, 145)
-    return (155, 216, 63) if hand["side"] == "Left" else (66, 171, 255)
+    return {"Left": (38, 89, 217), "Right": (229, 135, 57)}.get(hand["side"], (129, 135, 137))
 
 
 def text(canvas, value, x, y, size=.6, c=TEXT, thickness=1):
@@ -127,10 +127,8 @@ def composite(frame, sample, subtitle="FACTORY POV  /  MEDIAPIPE HAND LANDMARKER
 
 class VideoSink:
     def __init__(self, path: Path, fps: float):
-        if not shutil.which("ffmpeg"):
-            raise RuntimeError("FFmpeg is required for H.264 previews; install it or use --no-video")
         self.process = subprocess.Popen([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            require_tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1600x900", "-r", str(fps),
             "-i", "pipe:0", "-an", "-c:v", "libx264", "-preset", "veryfast",
             "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path),

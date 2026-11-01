@@ -9,6 +9,8 @@ CLIP="data/private/mytronlabs-000060-016.mp4"
 RELEASE="ps4-baseline-handoff-20261031"
 REPO="UdaiBatta/BIOS---Ship-Happens"
 
+if [ -n "${EGOHAND_FFMPEG_DIR:-}" ]; then export PATH="$EGOHAND_FFMPEG_DIR:$PATH"; fi
+
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1. $2"; exit 1; }; }
 need uv "Install: https://docs.astral.sh/uv/ (macOS: brew install uv)"
 need ffmpeg "Install FFmpeg (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt-get install ffmpeg)"

@@ -28,12 +28,18 @@ import cv2
 import numpy as np
 
 
+def _needs_full_bgr(detector) -> bool:
+    """Only full-resolution crop detectors need the original decoded frame."""
+    from .model import CropRescueDetector, Detector
+    return not isinstance(detector, (Detector, CropRescueDetector))
+
+
 def _detect_chunk(job: dict) -> dict:
     """Worker: decode sequentially to the chunk, detect, return detections keyed by frame index."""
     from .pipeline import build_detector
-    from .model import Detector
     args = argparse.Namespace(**job["args"])
     detector = build_detector(args)
+    needs_full_bgr = _needs_full_bgr(detector)
     keep = set(job["keep"])
     lookahead = set(job.get("lookahead", []))
     process_frames = sorted(set(job["warmup"]) | keep | lookahead)
@@ -62,7 +68,7 @@ def _detect_chunk(job: dict) -> dict:
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             timestamp = timestamps[index] - timestamps[0]
             t0 = time.perf_counter()
-            detections = (detector.detect(rgb, timestamp, frame) if not isinstance(detector, Detector)
+            detections = (detector.detect(rgb, timestamp, frame) if needs_full_bgr
                           else detector.detect(rgb, timestamp))
             if index in keep:
                 latency.append(time.perf_counter() - t0)
@@ -70,7 +76,7 @@ def _detect_chunk(job: dict) -> dict:
             elif index in lookahead:
                 ahead[index] = detections
             if backward is not None and (index in keep or index in lookahead):
-                backward.add(index, rgb, timestamp, None if isinstance(detector, Detector) else frame)
+                backward.add(index, rgb, timestamp, frame if needs_full_bgr else None)
         if backward is not None:
             backward.flush()
     finally:
@@ -112,17 +118,17 @@ class BackwardPass:
 
     def _run(self, count: int):
         """Detect buffer[:count] in reverse, warming up on the frames after them."""
-        from .model import Detector
         from .pipeline import build_detector
         started = time.perf_counter()
         detector = build_detector(self.args)
+        needs_full_bgr = _needs_full_bgr(detector)
         try:
             last = self.buffer[-1][2]
             for position in range(len(self.buffer) - 1, -1, -1):
                 index, rgb, timestamp, full_bgr = self.buffer[position]
                 reverse_time = last - timestamp  # strictly increasing, as VIDEO mode requires
-                detections = (detector.detect(rgb, reverse_time) if isinstance(detector, Detector)
-                              else detector.detect(rgb, reverse_time, full_bgr))
+                detections = (detector.detect(rgb, reverse_time, full_bgr) if needs_full_bgr
+                              else detector.detect(rgb, reverse_time))
                 if position < count and index in self.keep:
                     self.results[index] = detections
         finally:

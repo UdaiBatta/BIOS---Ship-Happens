@@ -214,7 +214,6 @@
     } else if (run.artifacts?.lift) {
       try {
         messages.push(`hand surfaces: ${addGeneratedMeshes()}`);
-        document.querySelector('#segMode [data-v="ours"]')?.click();   // meshes are drawn in camera space
       } catch (error) { messages.push(`hand surfaces: not built (${error.message})`); }
     }
     afterResults();
@@ -321,8 +320,12 @@
     const presets = await loadPresets();
     await refresh();
     try { await scan(); } catch (error) { toast(`Scan failed: ${error.message}`); }   // pick up new files
-    if (videos.length) await showVideo();
     if (!presets.includes('accurate')) toast('The server is running older code (no "accurate" preset). Stop it and the worker, then start scripts/run_local again.');
     status(`connected · ${runs.length} run(s)${health.auth_required && !token ? ' · token required (?token=…)' : ''}`);
+    const initialRun = params.get('run');
+    if (initialRun) {
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(initialRun)) throw new Error('run must be a run UUID');
+      await loadRun(initialRun);
+    } else if (videos.length) await showVideo();
   })();
 })();

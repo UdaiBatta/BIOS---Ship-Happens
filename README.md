@@ -9,26 +9,38 @@ video -> 21 image + 21 hand-relative 3D landmarks per hand -> short-term tracks 
 
 Two users: a data engineer preparing hand-motion data, and expert knowledge capture (replay an expert's hands, mark steps, compare flat video with 3D). EgoHand Twin complements setup sheets, ERP and cross-training; it does not replace them.
 
-## Status (31 Oct 2026)
+## Results at a glance
 
-Measured on one clip (one of four recording families) with **provisional labels**. A single annotator in the coding session made the labels and no person has reviewed them yet; see [RESULTS_V2](docs/RESULTS_V2.md).
+Common clips: the first 30 seconds of every locally supplied clip are the agreed comparison interval. Coverage and stability are reported separately from accuracy in [COMMON_CLIPS_RESULTS](docs/COMMON_CLIPS_RESULTS.md) when processing completes.
 
-| Capability | Status |
+| Preset | Common-clip recall | Precision | F1 | Wrong-side rate |
+| --- | --- | --- | --- | --- |
+| baseline | Not measured | Not measured | Not measured | Not measured |
+| recall | Not measured | Not measured | Not measured | Not measured |
+| accurate | Not measured | Not measured | Not measured | Not measured |
+| hybrid | Not measured | Not measured | Not measured | Not measured |
+
+These accuracy cells require human labels and denominators. Unreviewed labels remain provisional. Current laptop speed verification is in progress; the review-time pilot is not measured. Depth remains an assumed-lens estimate, the surface is generated from joints, and camera motion is not compensated. See [submission status](docs/FINAL_SUBMISSION_STATUS.md) and [performance](docs/PERFORMANCE_REPORT.md).
+
+## Current status (1 Nov 2026)
+
+Verification in this session: **197 pipeline tests passed, 1 skipped; 42 of 42 backend tests passed**. Browser verification and its limits are recorded in [BUG_BASH](docs/BUG_BASH.md).
+
+The current session's common accuracy has **not been measured**. The local `labels_v2` inputs needed to rescore earlier results are missing. [RESULTS_V2](docs/RESULTS_V2.md) and the other linked experiment reports retain historical, provisional measurements from one clip; those figures are not current-session results.
+
+| Capability | Current status |
 | --- | --- |
-| Landmarks, tracking (observed / predicted 2D-only / lost / retired), raw + filtered exports, Rerun replay | Implemented, verified on real footage |
-| Detection recovery, `--preset recall` (thresholds 0.3 + centre-crop rescue) | Holdout visible-hand recall 19/78 → 39/78, precision 39/40; more track fragmentation (2.17 vs 1.60 IDs per hand) |
-| `--preset accurate` (recall + a reverse-time detection pass) | Holdout recall 39/78 → 46/78, precision 46/48; dev 36/72 → 41/72 with no false positives; about 2× detector time; no gain on hands cut off at the bottom edge |
-| Quality windows, review queue, segment export, Rerun quality timeline | Implemented; heuristic. Flags catch 22/35 missed-hand frames on holdout; about 12 review items per minute |
-| Reliability in replay: state lanes, side probability, `missing_reason`, units | Implemented; `out_of_view` contradicted in 6/15 holdout cases, so treat it as a hint |
-| Same-moment flat-vs-3D image, `steps.json` step markers with sign-off | Implemented; whether 3D helps users is **not measured** |
-| Per-frame JSON Schema validation, governance and lens provenance in the manifest | Implemented (manifest schema 0.5) |
-| Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps). Parallel chunked detection (`--workers 2`): 63 s → 50 s for the recall preset, identical detections |
-| Django backend API with job worker | Implemented; 9 backend tests; endpoints answer in 5–32 ms once a run is indexed |
-| Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens; depth moves ±25% with the assumed FOV |
-| `--preset hybrid` (experimental accuracy mode: RTMPose recovers hands near a recently tracked hand that MediaPipe lost) | Holdout recall 39/78 → 47/78 but precision 0.975 → 0.887 and 2.6× time: **no-go as default** by the pre-set rule; `accurate` has better F1 (0.730 vs 0.718) ([EXPERIMENT_RESULTS](docs/EXPERIMENT_RESULTS.md)) |
-| Left/right flicker fix (crop detections keep the track's side, hysteresis, `unknown` instead of guessing) | Holdout wrong sides 11 → 5 of 49, Left↔Right flips 8 → 2, flicker within tracks 29 → 3; 12 hands now say `unknown` ([HANDEDNESS_ROOT_CAUSE](docs/HANDEDNESS_ROOT_CAUSE.md)) |
-| Solid 3D hands in the viewer | Low-poly surface (432 vertices) generated from the 21 lifted joints when a backend run loads: rounded fingers and a palm slab, typical thickness scaled to the measured palm. **Not a fitted hand-shape model** (no MANO/WiLoR); same assumed-lens depth caveats |
-| Fitted meshes (MANO/WiLoR), robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
+| MediaPipe landmarks, short-term tracking, explicit observed/predicted/lost states, raw and filtered exports | Implemented; predicted landmarks are 2D only |
+| Offline smoothing | Implemented: RTS-smoothed wrists and One Euro-smoothed finger offsets |
+| Local review viewer | Hand posture is the default 3D view. Experimental camera space has a labeled posture fallback when depth is unavailable. Viewpoints, follow-hand camera, state timeline, frame inspection, event review and exports are available. |
+| Generated 3D hand surface | Implemented for backend runs with camera-space landmarks; 970 vertices and 1,872 triangles. Bone-length calibration is applied. This is a generated visualization, not MANO/WiLoR fitting or validated geometry. |
+| Motion events | Inferred candidates with evidence links and review state; thresholds are heuristic and unvalidated |
+| Privacy scan | Experimental face-only review flags; not a privacy check or certification |
+| Camera-space lift | Experimental and based on assumed lens parameters; depth is unvalidated |
+| Current-session accuracy and user benefit | Not measured |
+| Fitted MANO/WiLoR hand model and robot export | Not implemented |
+
+Older performance and accuracy tables remain in the linked historical reports with their original caveats. See [KNOWN_LIMITATIONS](docs/KNOWN_LIMITATIONS.md) and [TODO](docs/TODO.md) for current measurement gaps.
 
 ## Quick start
 
@@ -39,14 +51,14 @@ bash scripts/run_local.sh                                          # macOS / Lin
 powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1     # Windows (add -Test to run all tests first)
 ```
 
-It installs dependencies, registers every video in `media/` (and the handoff clip in `data/private/` if present), starts the worker and opens http://127.0.0.1:8000/. Pick a video on the **Backend** row and click **Process**.
+It installs dependencies, registers every video in `media/` (and the handoff clip in `data/private/` if present), starts the worker and opens http://127.0.0.1:8000/. Selecting a video on the **Backend** row loads its newest completed run, or a preview when no run exists. Click **Process** for a new run.
 
 ### Manual setup
 
 Requirements: Python 3.11 or 3.12, FFmpeg/FFprobe, a laptop CPU.
 - **Linux:** MediaPipe also needs `libgles2 libegl1`.
 - **macOS:** `brew install ffmpeg`.
-- **Windows:** put FFmpeg on PATH.
+- **Windows:** put FFmpeg on PATH, or set `EGOHAND_FFMPEG_DIR` to its `bin` folder. The CLI, backend and launch scripts use this folder before PATH. In PowerShell: `$env:EGOHAND_FFMPEG_DIR = 'C:\path\to\ffmpeg\bin'`.
 
 ```sh
 uv sync --extra dev --extra viewer
@@ -140,7 +152,7 @@ The full method is in [DEFINITIONS](docs/DEFINITIONS.md), with results in [RESUL
 
 ## Privacy
 
-- **Kept out of git:** footage, labels, runs, recordings, previews and NPZ files stay in `data/` and `runs/`, which are git-ignored. No commit on any branch contains media or data files (checked 31 Oct).
+- **Kept out of git:** footage, labels, runs, recordings, previews and NPZ files stay in ignored local folders. The fresh remote-history scan passed on 1 Nov; the local all-ref scan flagged checkpoint artifacts. Release attachments and historical internal text still block publication. See [PUBLICATION_AUDIT](docs/PUBLICATION_AUDIT.md).
 - **Repository access:** keep this repository private while the restricted release assets are attached ([REFERENCE_ARTIFACTS](docs/REFERENCE_ARTIFACTS.md)). A public copy must be source-only, and docs that describe the footage must be removed first.
 - **Viewer:** disable Rerun analytics.
 - **Governance fields:** these record operator statements, which the software does not verify.
@@ -174,6 +186,7 @@ Before making the repository public, run `scripts/check_history.sh` to scan the 
 | [DEMO_AND_QA](docs/DEMO_AND_QA.md) | Five-minute demo, slides, claims checklist, judges' Q&A, user-test protocols |
 | [DEFINITIONS](docs/DEFINITIONS.md) | Frozen definitions of labels, states and metrics |
 | [SUBMISSION](docs/SUBMISSION.md) | Submission text and checklist |
+| [DEMO_SCRIPT](docs/DEMO_SCRIPT.md) | Current local viewer demo path and supported claims |
 | [TODO](docs/TODO.md) | Deferred work with blockers |
 | [BUILD_PROMPT](docs/BUILD_PROMPT.md) | Prompt for future feature work |
 | [MILESTONE_REPORT](docs/MILESTONE_REPORT.md), [WILOR_FEASIBILITY](docs/WILOR_FEASIBILITY.md), [AGENT_CONTINUATION_PROMPT](docs/AGENT_CONTINUATION_PROMPT.md), [REFERENCE_ARTIFACTS](docs/REFERENCE_ARTIFACTS.md) | Historical baseline and handoff material |
@@ -191,7 +204,7 @@ src/egohand_twin/
   governance.py  governance, retention         schema.py     JSON Schema validation (+ schemas/)
   lift.py        EXPERIMENTAL camera-space PnP parallel.py   parallel chunked detection, seam repair
 backend/         Django API (api/: models, views, services, jobs, worker command, tests)
-tests/           91 core tests; backend/api/tests: 9 API tests
+tests/           core and backend test suites
 ```
 
 ## References

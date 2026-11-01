@@ -6,7 +6,6 @@ import importlib.metadata
 import json
 from pathlib import Path
 import platform
-import shutil
 import subprocess
 import time
 
@@ -15,6 +14,7 @@ import numpy as np
 import psutil
 
 from .governance import load as load_governance
+from .ffmpeg import require_tool
 from .quality import frame_stats
 from .model import COORDINATES, MODEL_URL, CropRescueDetector, Detector, MultiViewDetector, sha256
 from .render import RerunSink, VideoSink, composite
@@ -23,7 +23,7 @@ from .tracking import IdentityTracker, baseline_records
 
 
 def _ffprobe_json(path: Path, *extra: str) -> dict:
-    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", *extra,
+    result = subprocess.run([require_tool("ffprobe"), "-v", "error", "-select_streams", "v:0", *extra,
                              "-of", "json", str(path)], check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -61,8 +61,7 @@ def probe(path: Path, timestamp_source: str = "auto", check_frames: int = 48):
     to ``frames`` on any disagreement. The pipeline additionally fails if more
     frames decode than timestamps exist.
     """
-    if not shutil.which("ffprobe"):
-        raise RuntimeError("FFprobe is required for source presentation timestamps")
+    require_tool("ffprobe")
     stream = _ffprobe_json(path, "-show_entries",
                            "stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames")["streams"][0]
     timestamps, source, note = None, "frames", None
@@ -372,7 +371,7 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             "stage_seconds_unattributed": round(elapsed - sum(stages.values()), 4),
             "timestamp_source": info["timestamp_source"],
             "detector_stats": getattr(detector, "stats", None),
-            "smoothing": ({"method": "offline: wrist constant-velocity Kalman + RTS; fingers One Euro relative to the wrist",
+            "smoothing": ({"method": "offline: wrist constant-velocity Kalman + RTS; image fingers One Euro relative to wrist; 3D finger directions centered in time with separately smoothed bone lengths",
                            "hands_smoothed": smoothed_hands} if not args.no_smoothing else None),
             "accuracy": None, "identity_switches": None,
             "notes": ["Coverage is not recall or accuracy; labels are required.",

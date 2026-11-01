@@ -9,7 +9,7 @@
 
 ## Short project description (current)
 
-EgoHand Twin reconstructs hand motion from head-mounted factory video, offline on a CPU, and helps data teams find which seconds are usable, uncertain or missing. It estimates 21 image and 21 hand-relative 3D landmarks per hand with MediaPipe, adds a recovery step that doubled visible-hand recall on held-out frames (19/78 → 39/78, 39/40 correct, provisional labels from one clip), and tracks hands with explicit observed, predicted (2D only) and lost states. A heuristic quality layer marks each second as suitable, needs review or insufficient evidence and builds a ranked, timestamped review queue. Exports are traceable to source frames, validated against a JSON schema, and carry governance and lens provenance. A synchronized Rerun replay shows video, 3D hands, state lanes, the quality timeline and step markers. Coordinates are hand-relative, not factory coordinates. Meshes and robot export are not implemented.
+EgoHand Twin processes head-mounted video locally and presents hand landmarks, short-term tracks, uncertainty states and review tools. The browser viewer supports synchronized video and landmark inspection, a 3D view with orbit, zoom and reset, a timeline, frame details, heuristic event review and exports. A generated hand surface is available for backend runs with camera-space landmarks; it is bone-length calibrated, but it is not a fitted MANO/WiLoR model. Motion events are inferred candidates with unvalidated thresholds. Face-only privacy flags are experimental review assistance. The current session's common accuracy has not been measured because the local `labels_v2` inputs are missing. Earlier single-clip measurements remain provisional historical results in [RESULTS_V2](RESULTS_V2.md). The camera-space lift assumes a lens model; depth is unvalidated. The system does not provide robot export or factory coordinates.
 
 ## Short project description (first milestone, historical)
 
@@ -20,14 +20,13 @@ EgoHand Twin is an offline computer-vision pipeline for inspecting hand motion i
 - Offline video processing with source presentation timestamps.
 - MediaPipe Tasks Hand Landmarker, up to two hands by default, 21 landmarks per hand.
 - Short-term identity assignment with spatial gates, motion, shape and soft handedness cues.
-- One Euro smoothing while preserving raw measurements.
+- Offline RTS wrist smoothing and One Euro finger-offset smoothing while preserving raw measurements.
 - Explicit missing-data states; predicted 2D points never count as observed detections and contain no invented 3D articulation.
 - Side-by-side H.264 video, synchronized Rerun replay and timestamped tracking events.
 - Raw/filtered JSONL, CSV and NPZ exports, source/model hashes and run metadata.
-- Evaluation against explicitly reviewed annotations, including precision/recall and sampled identity changes.
-- Eleven focused automated tests.
+- Evaluation tooling for annotated data. Current-session accuracy is not measured.
 
-## Verified evidence
+## Historical evidence (not remeasured in the current session)
 
 The tested machine was an Apple M1 MacBook Air with 8 GB RAM. The comparison used 900 consecutive frames from the first 30 seconds of one supplied 1080p, 30 FPS factory clip. Forty clips were inventoried; only one interval from one clip was benchmarked.
 
@@ -53,9 +52,11 @@ See [the complete measured report](MILESTONE_REPORT.md) for inference latency, m
 
 ## Submission checklist
 
-Current status (v2): see [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) for the audit, [RESULTS_V2.md](RESULTS_V2.md) for measurements and [DEMO_AND_QA.md](DEMO_AND_QA.md) for the demo and Q&A. The short description above remains accurate. Add one sentence: "A heuristic quality layer marks each second as suitable, needs review or insufficient evidence for hand-motion inspection and produces a timestamped review queue and traceable segment exports."
+Historical audit and experiment material is linked from [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) and [RESULTS_V2.md](RESULTS_V2.md). Use [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the current viewer click path. Do not present historical measurements as current-session accuracy.
 
-- [x] Split-aware dev/holdout labels: 96 frames, 150 hands. **Provisional — independent human review still required.**
+The checked entries below record completed historical work; their measurements remain provisional and were not rerun in the current session.
+
+- [ ] Current-session common accuracy measurement. The local `labels_v2` inputs needed for rescoring are missing.
 - [x] Detection recovery chosen on dev and scored once on holdout (recall 0.24 → 0.50, precision 39/40; provisional labels, one clip).
 - [x] Quality windows, review queue, segment export, Rerun quality timeline; flag evaluation and false-alarm burden reported.
 - [x] Verified fast timestamp probe and per-stage timing.
@@ -63,8 +64,8 @@ Current status (v2): see [PRODUCT_BRIEF.md](PRODUCT_BRIEF.md) for the audit, [RE
 - [ ] Ask the organizers the drafted questions in PRODUCT_BRIEF.md (lens intrinsics, QA framing, sharing of processed outputs).
 - [ ] When the organizers answer, set `consent_status` and `retention_until` in `data/private/governance_mytronlabs.json` (currently `unknown` / null) and reprocess the demo runs with `--governance`. Only runs made with `--governance` (e.g. `runs/final_demo`) record governance; `egohand retention-report runs` lists the rest as `governance_not_recorded`.
 - [ ] Run the review-time pilot (protocol in DEMO_AND_QA.md) or present the benefit as untested.
-- [x] Final demo run regenerated with final code: `runs/final_demo` (`--preset recall`, governance, schema-valid, quality, steps, `why3d_6s.png`, `review.rrd`). Private.
-- [ ] Record the five-minute demo from `runs/final_demo/review.rrd` and `preview.mp4`.
+- [ ] Confirm which local completed run is suitable for the demo; otherwise use the viewer preview and demonstrate processing explicitly.
+- [ ] Record the five-minute demo from a locally approved run.
 - [ ] A teammate reviews the labels: `egohand label-review` → fill `data/private/label_review/review.csv` → `label-review-apply` → re-run the evaluation commands in RESULTS_V2 §8.
 - [ ] Before any public copy: remove docs that name clips or describe the footage (RESULTS_V2, AGENT_CONTINUATION_PROMPT, REFERENCE_ARTIFACTS); keep the repository private while release assets are attached.
 
@@ -80,4 +81,4 @@ Historical checklist:
 - [ ] Prepare the required 5–6 slides and rehearse the five-minute presentation and three-minute Q&A.
 - [ ] Verify the final form links from a judge-accessible account before submitting.
 
-WiLoR/MANO integration remains an unrun feasibility investigation. Camera tracking and world-space reconstruction are optional future gates. Neither is presented as completed functionality.
+WiLoR/MANO fitting, robot export, camera-motion compensation and validated camera/world reconstruction remain unavailable. Motion-event thresholds and experimental face flags need labeled evaluation.

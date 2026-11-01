@@ -66,3 +66,21 @@ console.log(JSON.stringify({{ rawSd: sd(raw), calSd: sd(cal), dirOk, records: se
     r = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
     assert r["rawSd"] > 1e-3 and r["calSd"] < 1e-9           # index distal bone: varies raw, constant calibrated
     assert r["dirOk"] and r["records"] == 15                  # directions kept; every frame meshed
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js not installed")
+def test_posture_mesh_profile_ignores_invalid_samples_and_preserves_measurements():
+    script = f"""
+const M = require({json.dumps(str(MESH_JS))});
+const joints = {json.dumps(synthetic_hand())};
+const before = JSON.stringify(joints);
+const profile = M.profile([joints, [[NaN, 0, 0]]]);
+const vertices = M.build(M.calibrate(joints, profile.lengths), profile.scale);
+console.log(JSON.stringify({{ same: JSON.stringify(joints) === before,
+  finite: vertices.every(Number.isFinite), vertices: vertices.length / 3,
+  empty: M.profile([]), lengths: profile.lengths.length }}));
+"""
+    result = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+    assert result["same"] and result["finite"]
+    assert result["vertices"] == 970 and result["lengths"] == 21
+    assert result["empty"] is None

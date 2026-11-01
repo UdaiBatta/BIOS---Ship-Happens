@@ -138,3 +138,63 @@ def test_accurate_preset_enables_the_backward_pass():
     from egohand_twin.cli import process_args
     assert process_args(["v.mp4", "--out", "o", "--preset", "accurate"]).bidirectional is True
     assert not process_args(["v.mp4", "--out", "o", "--preset", "recall"]).bidirectional
+
+
+def test_accurate_crop_rescue_does_not_buffer_unused_full_frames(monkeypatch):
+    """Crop rescue uses the same RGB/timestamp inputs without retaining source-resolution BGR."""
+    import numpy as np
+    from egohand_twin import parallel
+    from egohand_twin.model import CropRescueDetector, MultiViewDetector
+
+    buffered = []
+    detectors = []
+
+    class CropSpy(CropRescueDetector):
+        def __init__(self):
+            self.inputs = []
+            detectors.append(self)
+
+        def detect(self, rgb, timestamp_s, full_bgr=None):
+            self.inputs.append((int(rgb[0, 0, 0]), round(timestamp_s, 6), full_bgr))
+            return [int(rgb[0, 0, 0])]
+
+        def close(self):
+            pass
+
+    class Capture:
+        def __init__(self):
+            self.index = 0
+
+        def read(self):
+            if self.index == 4:
+                return False, None
+            frame = np.full((2, 2, 3), self.index, dtype=np.uint8)
+            self.index += 1
+            return True, frame
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr("egohand_twin.pipeline.build_detector", lambda args: CropSpy())
+    monkeypatch.setattr(parallel.cv2, "VideoCapture", lambda path: Capture())
+    original_add = parallel.BackwardPass.add
+
+    def capture_buffer(self, index, rgb, timestamp, full_bgr=None):
+        buffered.append(full_bgr)
+        return original_add(self, index, rgb, timestamp, full_bgr)
+
+    monkeypatch.setattr(parallel.BackwardPass, "add", capture_buffer)
+    result = parallel._detect_chunk({
+        "args": {"max_width": 2, "bidirectional": True}, "keep": [0, 1, 2],
+        "warmup": [], "lookahead": [3], "chunk": 0, "video": "synthetic",
+        "timestamps": [10 + i / 30 for i in range(4)],
+    })
+
+    assert buffered == [None] * 4  # no full-resolution BGR references enter the backward buffer
+    assert [d.inputs for d in detectors] == [
+        [(i, round(i / 30, 6), None) for i in range(4)],
+        [(3 - i, round(i / 30, 6), None) for i in range(4)],
+    ]
+    assert result["detections"] == {0: [0], 1: [1], 2: [2]}
+    assert result["backward"] == {0: [0], 1: [1], 2: [2]}
+    assert parallel._needs_full_bgr(MultiViewDetector.__new__(MultiViewDetector))

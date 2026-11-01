@@ -11,6 +11,8 @@ $Clip = Join-Path $Root 'data\private\mytronlabs-000060-016.mp4'
 $Release = 'ps4-baseline-handoff-20261031'
 $Repo = 'UdaiBatta/BIOS---Ship-Happens'
 
+if ($env:EGOHAND_FFMPEG_DIR) { $env:Path = "$env:EGOHAND_FFMPEG_DIR;$env:Path" }
+
 function Need($name, $hint) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { throw "Missing: $name. $hint" }
 }
@@ -90,9 +92,9 @@ if (Test-Path $Clip) { $ToRegister += $Clip }
 if (Test-Path $Media) { $ToRegister += $Media }
 Run 'Registering the clip and every video in media\' { uv run python manage.py egohand_register @ToRegister }
 
-Write-Host '==> Starting the worker in a second window (close that window to stop it)' -ForegroundColor Cyan
+Write-Host '==> Starting the worker in the background (rerunning this script restarts it)' -ForegroundColor Cyan
 $Backend = (Get-Location).Path
-Start-Process powershell -ArgumentList '-NoExit', '-Command', "Set-Location '$Backend'; uv run python manage.py egohand_worker --recover"
+Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', "Set-Location '$Backend'; uv run python manage.py egohand_worker --recover" -RedirectStandardOutput (Join-Path $Root 'data\private\backend\worker.stdout.log') -RedirectStandardError (Join-Path $Root 'data\private\backend\worker.stderr.log')
 if (-not $NoBrowser) {
     Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command', 'Start-Sleep 5; Start-Process http://127.0.0.1:8000/'
 }

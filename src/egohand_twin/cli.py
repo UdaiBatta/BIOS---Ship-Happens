@@ -6,7 +6,6 @@ import importlib.metadata
 import json
 from pathlib import Path
 import platform
-import shutil
 import sys
 
 import cv2
@@ -14,6 +13,7 @@ import numpy as np
 import psutil
 
 from .annotate import apply_label_review, label_review_pack, make_annotation_set, parse_intervals
+from .ffmpeg import find_tool
 from .evaluation import evaluate
 from .identity import write_identity, write_identity_jsonl
 from .schema import validate_jsonl
@@ -72,7 +72,7 @@ def doctor(args):
                       "python": platform.python_version(), "logical_cpus": psutil.cpu_count(),
                       "ram_gb": round(psutil.virtual_memory().total/1024**3, 2),
                       "backend": "MediaPipe CPU (GPU acceleration not assumed)",
-                      "ffmpeg": shutil.which("ffmpeg"), "ffprobe": shutil.which("ffprobe"),
+                      "ffmpeg": find_tool("ffmpeg"), "ffprobe": find_tool("ffprobe"),
                       "packages": packages, "mediapipe_runtime": mediapipe_runtime(),
                       "notes": ["Disable Rerun usage analytics for offline use: uv run rerun analytics disable"]},
                      indent=2))

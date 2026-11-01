@@ -1,5 +1,7 @@
 # Smoothing comparison (why raw looked better)
 
+The numerical table below is historical. The current smoother also stabilizes 3D finger directions and bone lengths; its new temporal measurements and tradeoffs are in [POSE_STABILITY](POSE_STABILITY.md). Those are stability checks, not a new accuracy evaluation.
+
 **Root cause:** the old One Euro filter used `beta = 0.03` in normalised image units. Hand speeds are about 0.5 units/s, so it acted as a fixed 1.7 Hz low-pass and trailed fast hands by 65–80 px. It was applied to all 21 joints independently and was keyed per track (no cross-track contamination; reset after 0.2 s gaps).
 
 **Compared on identical tracks**, against labelled wrists (provisional labels; 1920×1080 px):

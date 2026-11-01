@@ -85,3 +85,56 @@ def test_process_args_raises_value_error_not_system_exit():
         process_args(["v.mp4", "--out", "o", "--workers", "0"])
     with pytest.raises(ValueError, match="detection_threshold"):
         process_args(["v.mp4", "--out", "o", "--detection-threshold", "2"])
+
+
+def test_backward_pass_runs_segments_in_reverse_with_warmup(monkeypatch):
+    """Each segment is detected newest-first, warmed up on the frames after it, and only kept
+    frames are recorded; reverse timestamps increase strictly within each detector."""
+    import argparse
+    from egohand_twin import parallel
+    calls = []
+
+    class Fake:
+        def __init__(self):
+            self.times = []
+
+        def detect(self, rgb, t, full=None):
+            assert not self.times or t > self.times[-1]
+            self.times.append(t)
+            calls.append(rgb)
+            return [rgb]
+
+        def close(self):
+            pass
+    monkeypatch.setattr("egohand_twin.pipeline.build_detector", lambda args: Fake())
+    keep = set(range(0, 10))
+    bp = parallel.BackwardPass(argparse.Namespace(), keep, segment=4, warmup=2)
+    for i in range(12):  # frames 10, 11 are the chunk's lookahead (warm-up only)
+        bp.add(i, i, i/30)
+    bp.flush()
+    assert sorted(bp.results) == list(range(10))
+    assert all(bp.results[i] == [i] for i in keep)
+    assert calls[:6] == [5, 4, 3, 2, 1, 0]  # first segment 0-3, warmed up on 5, 4
+    assert len(bp.buffer) == 0
+
+
+def test_add_backward_adds_only_missing_non_duplicate_hands():
+    import numpy as np
+    from egohand_twin.model import Detection
+    from egohand_twin.parallel import add_backward
+
+    def hand(x):  # a hand-sized spread of landmarks around x
+        image = np.zeros((21, 3))
+        image[:, 0] = x + np.linspace(0, .08, 21)
+        image[:, 1] = .5 + np.linspace(0, .12, 21)
+        return Detection(image, np.zeros((21, 3)), "Left", .9)
+    merged = add_backward([hand(.2)], [hand(.2), hand(.7)], 960, 540, num_hands=2)
+    assert len(merged) == 2 and merged[1].image[0, 0] == .7  # the duplicate at .2 was skipped
+    assert merged[1].origin_detail == "backward_pass" and merged[1].index == 1
+    assert len(add_backward([hand(.2), hand(.5)], [hand(.8)], 960, 540, num_hands=2)) == 2
+
+
+def test_accurate_preset_enables_the_backward_pass():
+    from egohand_twin.cli import process_args
+    assert process_args(["v.mp4", "--out", "o", "--preset", "accurate"]).bidirectional is True
+    assert not process_args(["v.mp4", "--out", "o", "--preset", "recall"]).bidirectional

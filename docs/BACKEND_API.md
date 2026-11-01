@@ -55,7 +55,7 @@ Environment variables (all optional):
 | Method and path | Response |
 | --- | --- |
 | `GET /api/health` | `{status, api_version, model_present, auth_required, queue: {queued, running}}` |
-| `GET /api/presets` | `{presets: {baseline, recall}, default}`, with measured notes (provisional labels) |
+| `GET /api/presets` | `{presets: {baseline, recall, accurate}, default}`, with measured notes (provisional labels) |
 
 ### Videos
 
@@ -134,6 +134,7 @@ Quality statuses are **heuristic, task-specific** assessments. `insufficient_evi
 | `GET /frames`, 2 s window, full | about 40 ms (102 KB gzip) |
 | Frame JPEG, cold → cached | 1.48 s → 6 ms |
 | Process 30 s of 1080p, recall preset, no preview | 63.2 s with 1 worker → 50.4 s with 2 workers (identical detections). The quality pass, indexing and proxy add about 25 s. |
+| Process 30 s of 1080p, accurate preset (recall + reverse-time pass), 2 workers | 101 s for detection and exports; the quality pass, indexing and proxy add about 25 s. |
 
 ## Not provided
 

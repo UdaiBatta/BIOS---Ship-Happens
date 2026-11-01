@@ -31,14 +31,20 @@ from .render import fit_image, text, rebuild_replay
 
 PRESETS = {
     "baseline": {"detection_threshold": .5, "presence_threshold": .5, "tracking_threshold": .5, "rescue_crop": False},
-    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True},
+    "recall": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "pair_margin": .3},
+    # recall + a second, reverse-time detection pass (offline only; about 2x detector time).
+    "accurate": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "pair_margin": .3,
+                 "bidirectional": True},
+    # recall + an RTMDet hand detector for hands MediaPipe's palm detector misses (needs fetch-model --rtm).
+    "hybrid": {"detection_threshold": .3, "presence_threshold": .3, "tracking_threshold": .3, "rescue_crop": True, "box_link": True, "side_hysteresis": .15, "crop_side_weight": 0., "pair_margin": .3, "last_position_link": True,
+               "hand_detector": True},
 }
 
 
 def apply_preset(args):
     """Fill unset detector options from the preset; explicitly given flags win."""
     for key, value in PRESETS[args.preset].items():
-        if getattr(args, key) is None:
+        if getattr(args, key, None) is None:
             # An explicit --rescue strategy replaces the preset's historical centre crop.
             setattr(args, key, False if key == "rescue_crop" and getattr(args, "rescue", None) else value)
     return args
@@ -181,6 +187,15 @@ def governance_init(a):
     print(out)
 
 
+def fetch_command(a):
+    report = fetch_model(Path(a.model))
+    if a.rtm:
+        from .hybrid import fetch_rtm_models
+        report = {"mediapipe": report,
+                  "rtm": fetch_rtm_models(Path(a.rtm_models), Path(a.rtm_zips) if a.rtm_zips else None)}
+    print(json.dumps(report, indent=2))
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The single source of truth for command options (also used by the Django job worker)."""
     parser = argparse.ArgumentParser(description="EgoHand Twin: offline 3D hand landmark reconstruction")
@@ -189,7 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=doctor)
     p = commands.add_parser("fetch-model", help="Download the versioned official MediaPipe task model")
     p.add_argument("--model", default="models/hand_landmarker.task")
-    p.set_defaults(func=lambda a: print(json.dumps(fetch_model(Path(a.model)), indent=2)))
+    p.add_argument("--rtm", action="store_true",
+                   help="Also download the RTMDet/RTMPose hand models (Apache-2.0) for --preset hybrid")
+    p.add_argument("--rtm-models", default="models/rtm")
+    p.add_argument("--rtm-zips", help="Folder that already holds the two OpenMMLab zips (no download)")
+    p.set_defaults(func=fetch_command)
     p = commands.add_parser("process", help="Export landmarks and synchronized replay")
     p.add_argument("video")
     p.add_argument("--out", required=True)
@@ -215,11 +234,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-smoothing", action="store_true")
     p.add_argument("--tracker-units", choices=["normalized", "diagonal"], default="normalized",
                    help="Association distance units; diagonal is aspect-ratio correct")
+    p.add_argument("--box-link", action="store_true", default=None,
+                   help="Second tracker pass: link a detection to a just-missed track when their hand boxes "
+                        "overlap >50%% (one identity, no predicted ghost over an observed hand)")
+    p.add_argument("--side-hysteresis", type=float, default=None,
+                   help="Shown left/right changes only when the track's P(right) passes 0.5 +/- this (default 0)")
+    p.add_argument("--crop-side-weight", type=float, default=None,
+                   help="Weight of a centre-crop-rescue detection's left/right in its track's P(right) "
+                        "(default 0.15 like full-frame; 0 = the track keeps its side)")
+    p.add_argument("--last-position-link", action="store_true", default=None,
+                   help="Tracker second pass: an unmatched detection rejoins an unmatched recent track near "
+                        "where it was last seen (part of --preset hybrid; RTMPose recoveries)")
+    p.add_argument("--pair-margin", type=float, default=None,
+                   help="Two observed hands with the same side: show the one with weaker evidence (|P(right)-0.5| "
+                        "below this) as unknown")
     p.add_argument("--predict-seconds", type=float, default=.15)
     p.add_argument("--retain-seconds", type=float, default=.8)
     p.add_argument("--preset", choices=sorted(PRESETS), default="baseline",
                    help="baseline: MediaPipe defaults (historical B0). recall: thresholds 0.3 + centre-crop rescue, "
-                        "chosen on dev labels and confirmed once on holdout (provisional labels). Explicit flags override.")
+                        "chosen on dev labels and confirmed once on holdout (provisional labels). accurate: recall + a reverse-time "
+                        "pass (about 2x detector time). hybrid: recall + an RTMDet hand detector (needs fetch-model --rtm). "
+                        "Explicit flags override.")
+    p.add_argument("--hand-detector", action="store_true", default=None,
+                   help="Add an RTMDet hand detector for hands MediaPipe misses (part of --preset hybrid; "
+                        "needs: egohand fetch-model --rtm)")
+    p.add_argument("--rtm-models", default="models/rtm", help="Folder with the RTM hand models")
+    p.add_argument("--discover-every", type=int, default=None,
+                   help="EXPERIMENTAL (hybrid): every N frames look for never-tracked hands; accepted after 3 "
+                        "consecutive confirmations")
+    p.add_argument("--bidirectional", action="store_true", default=None,
+                   help="Also run detection backwards in time and add hands the forward pass missed "
+                        "(offline; about 2x detector time; part of --preset accurate)")
     p.add_argument("--detection-threshold", type=float)
     p.add_argument("--presence-threshold", type=float)
     p.add_argument("--tracking-threshold", type=float)
@@ -250,6 +295,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--split", help="Only score frames from this label split (e.g. dev or holdout)")
     p.add_argument("--conditions", help="conditions.json: exclude flagged frames (reported) and slice recall by condition")
     p.set_defaults(func=evaluate_command)
+    p = commands.add_parser("privacy", help="Candidate privacy flags (faces only, review assistance) -> RUN/privacy_flags.json")
+    p.add_argument("video")
+    p.add_argument("run")
+    p.add_argument("--every", type=float, default=1., help="Seconds between checked frames")
+    p.add_argument("--face-model", default="models/blaze_face_short_range.tflite")
+    p.set_defaults(func=lambda a: print(__import__("egohand_twin.privacy", fromlist=["x"]).write_privacy(
+        Path(a.video), Path(a.run), __import__("egohand_twin.privacy", fromlist=["x"]).fetch_face_model(Path(a.face_model)), a.every)))
+    p = commands.add_parser("events", help="Inferred candidate motion events -> RUN/motion_events.json")
+    p.add_argument("run")
+    p.set_defaults(func=lambda a: print(__import__("egohand_twin.motion_events", fromlist=["x"]).write_events(Path(a.run))))
     p = commands.add_parser("identity", help="Offline whole-track left/right vote -> RUN/identity.json")
     p.add_argument("run")
     p.add_argument("--margin", type=float, default=.15)

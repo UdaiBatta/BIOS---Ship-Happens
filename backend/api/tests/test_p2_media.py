@@ -105,7 +105,8 @@ class MediaRegressionTests(TestCase):
         self.assertEqual(details["proxy"]["time_offset_s"], 1.1)
         self.assertEqual(details["artifacts"], {"identity": "identity.json",
                                                  "lift": {"summary": "lift_hfov120.json",
-                                                          "arrays": "lift_hfov120.npz"}})
+                                                          "arrays": "lift_hfov120.npz"},
+                                                 "motion_events": None})
         artifact = self.client.get(f"/api/runs/{run.pk}/artifacts/lift_hfov120.json")
         self.assertEqual(artifact.status_code, 200)
         artifact.close()

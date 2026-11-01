@@ -41,6 +41,7 @@ def _detect_chunk(job: dict) -> dict:
     last = process_frames[-1]
     timestamps = job["timestamps"]
     results, latency, ahead = {}, [], {}
+    backward = BackwardPass(args, keep) if getattr(args, "bidirectional", False) else None
     cap = cv2.VideoCapture(job["video"])
     started = time.perf_counter()
     try:
@@ -68,11 +69,84 @@ def _detect_chunk(job: dict) -> dict:
                 results[index] = detections
             elif index in lookahead:
                 ahead[index] = detections
+            if backward is not None and (index in keep or index in lookahead):
+                backward.add(index, rgb, timestamp, None if isinstance(detector, Detector) else frame)
+        if backward is not None:
+            backward.flush()
     finally:
         cap.release()
         detector.close()
+        if backward is not None:
+            backward.close()
     return {"chunk": job["chunk"], "detections": results, "lookahead": ahead, "latency": latency,
+            "backward": backward.results if backward is not None else {},
+            "backward_seconds": backward.seconds if backward is not None else 0.,
             "seconds": time.perf_counter() - started, "frames": len(keep), "warmup": len(job["warmup"])}
+
+
+class BackwardPass:
+    """Reverse-time detection over a chunk, in bounded memory.
+
+    MediaPipe's VIDEO mode carries a hand from one frame to the next. Running it backwards
+    lets a hand that is only clear LATER in a shot be followed back into earlier frames the
+    forward pass missed. Frames are buffered in segments of ``segment`` frames; each segment
+    is detected in reverse with a fresh detector, starting ``warmup`` frames after its end
+    (those warm-up results are discarded), so memory stays at about segment+warmup frames.
+    Measured on one clip with provisional labels: dev recall 36/72 -> 41/72 (0 false
+    positives), holdout 39/78 -> 46/78 (false positives 1 -> 2), about 2x detector time.
+    """
+    def __init__(self, args, keep: set, segment: int = 300, warmup: int = 30):
+        self.args, self.keep, self.segment, self.warmup = args, keep, segment, warmup
+        self.buffer: list[tuple] = []
+        self.results: dict[int, list] = {}
+        self.seconds = 0.
+
+    def add(self, index, rgb, timestamp, full_bgr=None):
+        self.buffer.append((index, rgb, timestamp, full_bgr))
+        if len(self.buffer) >= self.segment + self.warmup:
+            self._run(self.segment)
+
+    def flush(self):
+        if self.buffer:
+            self._run(len(self.buffer))
+
+    def _run(self, count: int):
+        """Detect buffer[:count] in reverse, warming up on the frames after them."""
+        from .model import Detector
+        from .pipeline import build_detector
+        started = time.perf_counter()
+        detector = build_detector(self.args)
+        try:
+            last = self.buffer[-1][2]
+            for position in range(len(self.buffer) - 1, -1, -1):
+                index, rgb, timestamp, full_bgr = self.buffer[position]
+                reverse_time = last - timestamp  # strictly increasing, as VIDEO mode requires
+                detections = (detector.detect(rgb, reverse_time) if isinstance(detector, Detector)
+                              else detector.detect(rgb, reverse_time, full_bgr))
+                if position < count and index in self.keep:
+                    self.results[index] = detections
+        finally:
+            detector.close()
+        self.seconds += time.perf_counter() - started
+        self.buffer = self.buffer[count:]
+
+    def close(self):
+        self.buffer = []
+
+
+def add_backward(forward: list, backward: list, width: int, height: int, num_hands: int) -> list:
+    """Forward detections first; add backward-pass hands that are not duplicates, up to num_hands."""
+    from .model import is_duplicate
+    merged = list(forward)
+    for candidate in backward:
+        if len(merged) >= num_hands:
+            break
+        if any(is_duplicate(candidate, d, width, height) for d in merged):
+            continue
+        candidate.index = len(merged)
+        candidate.origin_detail = "backward_pass"
+        merged.append(candidate)
+    return merged
 
 
 class PrecomputedDetector:
@@ -156,10 +230,13 @@ def merge_chunks(results: list[dict], agree: int = 5) -> tuple[dict, list[dict]]
 def process_parallel(args, progress=None, workers: int = 1, overlap: int = 15, lookahead: int = 60):
     """Process ``args`` with ``workers`` detection processes; workers=1 is the sequential pipeline."""
     from .pipeline import probe, process
-    if workers <= 1:
+    bidirectional = bool(getattr(args, "bidirectional", False))
+    if workers <= 1 and not bidirectional:
         return process(args, progress=progress)
+    workers = max(1, workers)
     started = time.perf_counter()
-    timestamps = probe(Path(args.video), getattr(args, "timestamp_source", "auto"))["timestamps"]
+    info = probe(Path(args.video), getattr(args, "timestamp_source", "auto"))
+    timestamps = info["timestamps"]
     relative = np.asarray(timestamps) - timestamps[0]
     end = args.start_seconds + args.duration if args.duration is not None else np.inf
     selected = [i for i in np.flatnonzero((relative >= args.start_seconds) & (relative < end)).tolist()
@@ -185,6 +262,14 @@ def process_parallel(args, progress=None, workers: int = 1, overlap: int = 15, l
             if progress is not None:
                 progress(int(.8*done), len(selected))
     merged, seams = merge_chunks(results)
+    added_backward = 0
+    if bidirectional:
+        backward = {i: d for r in results for i, d in r["backward"].items()}
+        width, height = _inference_size(args, info)
+        for index in merged:
+            before = len(merged[index])
+            merged[index] = add_backward(merged[index], backward.get(index, []), width, height, args.num_hands)
+            added_backward += len(merged[index]) - before
     for index, detections in merged.items():
         by_timestamp[round(relative[index], 6)] = detections
     detection_wall = time.perf_counter() - started
@@ -198,11 +283,21 @@ def process_parallel(args, progress=None, workers: int = 1, overlap: int = 15, l
                           "detection_wall_seconds": round(detection_wall, 3),
                           "chunks": sorted(chunk_stats, key=lambda c: c["chunk"]),
                           "detector_cpu_seconds": round(sum(latency.values()), 3),
+                          "bidirectional": ({"hands_added_by_backward_pass": added_backward,
+                                             "backward_seconds": round(sum(r["backward_seconds"] for r in results), 3)}
+                                            if bidirectional else None),
                           "note": ("Detection ran in parallel processes; the pipeline's 'detect' stage only "
                                    "looks up precomputed results. processing_seconds includes the parallel "
                                    "phase.")}}
     return process(args, progress=tail_progress, detector_override=detector, started=started,
                    extra_metrics=extra)
+
+
+def _inference_size(args, info: dict) -> tuple[int, int]:
+    """Width and height of the frames given to the detector (for pixel-based duplicate checks)."""
+    w, h = int(info["width"]), int(info["height"])
+    scale = min(1., args.max_width/w)
+    return (round(w*scale), round(h*scale)) if scale < 1 else (w, h)
 
 
 def compare_runs(a, b) -> dict:

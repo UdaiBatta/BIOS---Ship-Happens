@@ -22,6 +22,8 @@ dev = ["pytest>=8,<10"]
 backend = [
     "django>=5.1,<6",
 ]
+# Experimental --preset hybrid (RTMDet/RTMPose hand models via onnxruntime; models: egohand fetch-model --rtm)
+hybrid = ["onnxruntime>=1.17,<2"]
 
 [project.scripts]
 egohand = "egohand_twin.cli:main"

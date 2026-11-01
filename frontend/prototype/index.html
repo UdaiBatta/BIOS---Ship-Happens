@@ -76,13 +76,22 @@
   .note { color: var(--muted); }
 
   main {
+    --col-video: 1fr; --col-three: 1fr;
     display: grid; gap: 12px; padding: 12px 16px 16px; align-items: start;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 340px;
+    grid-template-columns: minmax(0, var(--col-video)) minmax(0, var(--col-three)) 340px;
     grid-template-areas:
       "video three side1"
       "lanes lanes side2"
       "signals signals side3";
   }
+  /* Workspaces: Review hides diagnostics-only panels; Analysis drops the video and 3D panels. */
+  body.ws-review #p-signals, body.ws-review #p-export { display: none; }
+  body.ws-analysis #p-video, body.ws-analysis #p-three { display: none; }
+  body.ws-analysis main { grid-template-areas: "lanes lanes side1" "signals signals side2" "signals signals side3"; }
+  #p-three { position: relative; }
+  .split-handle { position: absolute; left: -9px; top: 0; bottom: 0; width: 6px; cursor: col-resize; border-radius: 3px; }
+  .split-handle:hover, .split-handle.drag { background: var(--axis); }
+  .ws-tabs button { min-width: 74px; }
   @media (max-width: 1250px) {
     main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       grid-template-areas: "video three" "lanes lanes" "signals signals" "side1 side2" "side3 side3"; }
@@ -115,6 +124,13 @@
   .hint { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: var(--muted); pointer-events: none; }
 
   .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 12px; margin: 2px 0 8px; }
+  .tl-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; }
+  .tl-bar .btn { padding: 2px 9px; }
+  .tl-summary { color: var(--ink-2); font-size: 12px; margin: 0 0 6px; font-variant-numeric: tabular-nums; display: flex; gap: 18px; flex-wrap: wrap; }
+  .tl-summary b { color: var(--ink); font-weight: 600; }
+  .tl-sel { margin-top: 8px; border: 1px solid var(--axis); border-radius: 6px; padding: 8px 10px; font-size: 12px; color: var(--ink-2); display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 16px; }
+  .tl-sel .k { color: var(--muted); } .tl-sel .warn { color: var(--warning); }
+  .tl-sel .actions { grid-column: 1 / -1; display: flex; gap: 6px; margin-top: 4px; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .key-rect { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
   .key-line { width: 16px; height: 2px; display: inline-block; border-radius: 1px; }
@@ -171,6 +187,14 @@
 <body>
 <header class="top">
   <span class="brand">EGOHAND TWIN</span>
+  <div class="seg ws-tabs" id="segWorkspace" role="tablist" aria-label="Workspace">
+    <button data-v="review" aria-pressed="true" title="Inspect footage, hands in 3D, timeline and events">Review</button>
+    <button data-v="analysis" aria-pressed="false" title="Timeline, motion signals, events and export">Analysis</button>
+    <button data-v="diagnostics" aria-pressed="false" title="Everything, including pipeline diagnostics">Diagnostics</button>
+  </div>
+  <div class="seg" id="segLayout" role="group" aria-label="Video / 3D layout" title="Video / 3D split (or drag the divider)">
+    <button data-v="0.5" aria-pressed="true">Balanced</button><button data-v="0.68" aria-pressed="false">Video</button><button data-v="0.32" aria-pressed="false">3D</button>
+  </div>
   <span class="clip" id="clipInfo">—</span>
   <div class="chips" id="chips"></div>
 </header>
@@ -186,8 +210,8 @@
   <span class="sep"></span>
   <span class="note">3D:</span>
   <div class="seg" id="segMode" role="group" aria-label="3D mode">
-    <button data-v="ours" aria-pressed="true" title="Both hands placed in camera space (lens model + PnP)">Ours · camera-space</button>
-    <button data-v="baseline" aria-pressed="false" title="MediaPipe world landmarks, hand-relative, arbitrary spacing">Baseline · hand-relative</button>
+    <button data-v="ours" aria-pressed="true" title="Both hands placed in APPROXIMATE camera space: PnP under an assumed (uncalibrated) fisheye lens; depth unvalidated">Ours · approx. camera-space</button>
+    <button data-v="baseline" aria-pressed="false" title="MediaPipe world landmarks: hand-relative 3D only, hands placed at arbitrary spacing">Baseline · hand-relative</button>
   </div>
   <div class="seg" id="segSmooth" role="group" aria-label="Raw or smoothed">
     <button data-v="smooth" aria-pressed="true">Smoothed</button>
@@ -211,6 +235,7 @@
   </section>
 
   <section class="panel" id="p-three" aria-label="Camera-space 3D view">
+    <div class="split-handle" id="splitHandle" role="separator" aria-orientation="vertical" aria-label="Resize video and 3D panels" title="Drag to resize video / 3D"></div>
     <h2>2 · 3D hands <span class="sub" id="threeSub">camera frame · orbit = drag · zoom = wheel · reset = double-click</span></h2>
     <div class="stage" id="stageThree">
       <canvas id="cvThree" style="cursor: grab"></canvas>
@@ -224,15 +249,28 @@
         <button data-v="both" aria-pressed="true">Mesh + skeleton</button>
       </div>
       <label><input type="checkbox" id="chkTrails" checked> wrist trails (2 s)</label>
+      <label title="Draw mesh edges only"><input type="checkbox" id="chkWire"> wireframe</label>
+      <label title="Mesh opacity">opacity <input type="range" id="rngOpacity" min="0.2" max="1" step="0.05" value="1" style="width: 80px; vertical-align: middle"></label>
+      <button class="btn" id="btnCamReset" title="Reset the 3D camera (also: double-click the 3D view)">Reset view</button>
     </div>
     <div class="legend note" id="meshNote" hidden></div>
   </section>
 
-  <section class="panel" id="p-lanes" aria-label="Reliability timeline">
-    <h2>3 · Timeline <span class="sub">reliability lanes (HOT3D-style masks) · click to seek</span></h2>
-    <div class="breakdown" id="breakdown"></div>
+  <section class="panel" id="p-lanes" aria-label="Motion timeline">
+    <h2>3 · Timeline <span class="sub">click: seek &amp; inspect · drag: scrub · wheel: zoom · shift+wheel / drag axis: pan · double-click: fit</span></h2>
+    <div class="tl-bar" role="toolbar" aria-label="Timeline navigation">
+      <button class="btn" id="tlZoomOut" title="Zoom out (−)">−</button><button class="btn" id="tlZoomIn" title="Zoom in (+)">+</button><button class="btn" id="tlFit" title="Show the whole run (0)">Fit</button>
+      <span class="time" id="tlRange"></span>
+      <span class="sep"></span>
+      <button class="btn" id="tlPrevFail" title="Previous tracking failure (Shift+F)">◀ failure</button><button class="btn" id="tlNextFail" title="Next tracking failure (F)">failure ▶</button>
+      <button class="btn" id="tlPrevReacq" title="Previous reacquisition (Shift+R)">◀ reacq.</button><button class="btn" id="tlNextReacq" title="Next reacquisition (R)">reacq. ▶</button>
+      <span class="sep"></span>
+      <label class="note" title="Blur, 3D validity, mesh lanes and the signal charts"><input type="checkbox" id="tlDiag"> diagnostics</label>
+    </div>
+    <div class="tl-summary" id="breakdown"></div>
     <div class="legend" id="lanesLegend"></div>
     <canvas class="chart" id="cvLanes"></canvas>
+    <div class="tl-sel" id="tlSelection" hidden></div>
   </section>
 
   <section class="panel" id="p-signals" aria-label="Signals">
@@ -549,6 +587,10 @@ function deriveAll() {
     { key: 'wearer_right', label: 'Right hand', kind: 'hand', side: 'wearer_right', values: F.map((f) => laneState(handFor(f, 'wearer_right'))) },
   ];
   if (hasOther) lanes.push({ key: 'other', label: 'Other people', kind: 'hand', side: 'other', values: F.map((f) => laneState(handFor(f, 'other'))) });
+  // Hands whose side is unknown (the tracker abstains rather than guess) are tracked too: without this lane
+  // they looked like "not tracked" in both side lanes.
+  if (F.some((f) => f.hands.some((h) => h.anatomical_side === 'unknown' && h.state !== 'retired' && h.state !== 'lost')))
+    lanes.push({ key: 'unknown', label: 'Unknown side', kind: 'hand', side: 'unknown', values: F.map((f) => laneState(handFor(f, 'unknown'))) });
   for (const [key, label] of [['low_blur', 'Low blur'], ['cam_space_valid', '3D valid']])   // shown only when the run has the data
     if (F.some((f) => typeof f.quality.masks[key] === 'boolean')) lanes.push({ key, label, kind: 'mask', values: F.map((f) => f.quality.masks[key]) });
   let meshObserved = 0, meshShown = 0;
@@ -603,7 +645,7 @@ function deriveEvents(F, lanes) {
   const ev = [], T = (i) => S.times[Math.min(i, S.times.length - 1)], end = (i) => (i < S.times.length ? S.times[i] : S.tEnd);
   for (const L of lanes) {
     if (L.kind === 'hand') {
-      const who = L.side === 'other' ? "Other person's hand" : (L.side === 'wearer_left' ? 'Left hand' : 'Right hand');
+      const who = L.side === 'other' ? "Other person's hand" : L.side === 'unknown' ? 'Hand (side unknown)' : (L.side === 'wearer_left' ? 'Left hand' : 'Right hand');
       let prev = 'none';
       for (const r of L.runs) {
         const v = r.v;
@@ -612,6 +654,7 @@ function deriveEvents(F, lanes) {
         if (v === 'predicted') ev.push({ type: 'hand_predicted', severity: 'info', label: `${who} predicted (2D only, no 3D)`, side: L.side, i0: r.i0, i1: r.i1 });
         if (v === 'lost') ev.push({ type: 'hand_lost', severity: 'warn', label: `${who} lost`, side: L.side, i0: r.i0, i1: r.i1 });
         if (v === 'retired') ev.push({ type: 'track_retired', severity: 'info', label: `${who}: track ended`, side: L.side, i0: r.i0, i1: r.i1 });
+        if (L.side === 'unknown' && HAS_3D.has(v)) ev.push({ type: 'identity_unknown', severity: 'info', label: 'Hand tracked, side unknown (insufficient evidence)', side: L.side, i0: r.i0, i1: r.i1 });
         prev = v;
       }
     } else if (L.kind === 'mesh') {
@@ -632,6 +675,15 @@ function deriveEvents(F, lanes) {
     for (const r of toRuns(bad)) if (r.v) ev.push({ type: 'depth_implausible', severity: 'warn', label: `${SIDE_LABEL[side]}: depth outside ${PLAUSIBLE_DEPTH[0]}–${PLAUSIBLE_DEPTH[1]} m`, side, i0: r.i0, i1: r.i1 });
   }
   // Long "3D not valid" runs while no hand is in view are just "no hand": keep only runs that overlap a tracked hand.
+  // Candidate motion events from the backend (motion_events.json): inferred, evidence-linked, reviewable.
+  for (const m of S.extraEvents || []) {
+    if (!['candidate_hold', 'candidate_movement', 'long_gap'].includes(m.event_type)) continue;   // entry/exit duplicate the lanes
+    const i0 = indexAt(m.start_time_s), i1 = Math.max(i0 + 1, indexAt(m.end_time_s) + 1);
+    const who = m.hand === 'left' ? 'Left hand' : m.hand === 'right' ? 'Right hand' : 'Hand (side unknown)';
+    const name = { candidate_hold: 'candidate hold (wrist nearly still)', candidate_movement: 'candidate movement', long_gap: 'long tracking gap' }[m.event_type];
+    ev.push({ type: m.event_type, severity: m.event_type === 'long_gap' ? 'warn' : 'info', label: `${who} · ${name} · #${m.track_id} · ${m.review_status}`,
+      side: m.hand, i0, i1, motion: m });
+  }
   const out = ev.filter((e) => !(e.type === 'cam_space_invalid' && !anyTracked(e.i0, e.i1)));
   for (const e of out) { e.clip_id = S.clipId; e.start_s = T(e.i0); e.end_s = end(e.i1); }
   out.sort((a, b) => a.start_s - b.start_s);
@@ -649,6 +701,14 @@ function indexAt(t) {
 // Middle of frame i's display interval. Seeking a video there shows exactly that frame (no rounding at frame boundaries).
 function frameMid(i) { const next = i + 1 < S.times.length ? S.times[i + 1] : S.times[i] + 1 / S.fps; return (S.times[i] + next) / 2; }
 function inData(t) { return S.frames.length > 0 && t >= S.tStart - 1e-6 && t <= S.tEnd + 1e-3; }
+// Presented-frame clock (see tick). Registered once on the shared <video> element.
+(function watchPresentedFrames() {
+  const v = document.getElementById('video');
+  if (!v || !v.requestVideoFrameCallback) return;            // older browsers: fall back to currentTime
+  const cb = (now, md) => { S.presentedT = md.mediaTime; S.dirty = true; v.requestVideoFrameCallback(cb); };
+  v.requestVideoFrameCallback(cb);
+  for (const e of ['seeking', 'emptied', 'loadstart']) v.addEventListener(e, () => { S.presentedT = null; });
+})();
 function seek(t) {
   S.t = clamp(t, S.tStart, Math.max(S.tStart, S.tEnd - 1e-3));
   S.idx = indexAt(S.t);
@@ -710,7 +770,12 @@ function drawVideo() {
     if (hnd.state === 'reacquired') { g.beginPath(); g.arc(P[0][0], P[0][1], 11, 0, Math.PI * 2); g.lineWidth = 2; g.strokeStyle = COLOR.ink; g.stroke(); }
     g.restore();
     // Label: text in ink, identity carried by the colour key.
-    const lab = `${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side} · ${hnd.state}${hnd.detection_origin ? ' · ' + hnd.detection_origin.replace(/_/g, ' ') : ''}`;
+    const debug = S.debugLabels !== false;   // off = clean labels for presentation (toggle in the backend bar)
+    const src = hnd.detection_origin_detail || hnd.detection_origin;
+    const threeD = hnd.world_source === 'fitted_from_2d' ? ' · 3D fitted from 2D' : (S.lift && HAS_3D.has(hnd.state) && !hnd.cam_xyz_m ? ' · no 3D' : '');
+    const lab = debug
+      ? `#${hnd.track_id} ${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side} · ${hnd.state}${src ? ' · ' + src.replace(/_/g, ' ') : ''}${threeD}`
+      : `${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side}`;
     drawTag(g, placed, P[0][0] - 20, P[0][1] + 22, w, h, lab, col);
   }
 }
@@ -800,7 +865,8 @@ function drawThree() {
       for (let j = 0; j < 21; j++) { const A = P(pts[j]); drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
     } else if (S.display === 'both') overlay.push(pts.map(P));
     const meshTag = ours && S.mesh && S.display !== 'skeleton' && side !== 'other' ? (mesh ? ` · ${S.mesh.backend} mesh` : ' · no mesh (skeleton)') : '';
-    const depthTag = ours && hnd.cam_xyz_m ? ` · ${num(wristDepth(hnd), 2)} m` : '';
+    // Not a measured distance: assumed lens + MediaPipe's learned hand size. Shown as an estimate.
+    const depthTag = ours && hnd.cam_xyz_m ? ` · ≈${num(wristDepth(hnd), 1)} m est.` : '';
     drawList.push({ d: 0, kind: 'label', A: P(pts[0]), col, text: `${SIDE_LABEL[side] || side}${depthTag}${meshTag}` });
   }
   if (ours && $('chkTrails').checked) {
@@ -816,7 +882,12 @@ function drawThree() {
   }
   drawList.sort((a, b) => b.d - a.d);
   let triFill = null;   // open path of consecutive same-colour triangles (painter order is unchanged)
-  const flushTris = () => { if (triFill) { g.fillStyle = triFill; g.fill(); triFill = null; } };
+  const flushTris = () => {
+    if (!triFill) return;
+    g.globalAlpha = S.meshOpacity ?? 1;
+    if (S.wireframe) { g.strokeStyle = triFill; g.lineWidth = 0.6; g.stroke(); } else { g.fillStyle = triFill; g.fill(); }
+    g.globalAlpha = 1; triFill = null;
+  };
   for (const it of drawList) {
     if (it.kind === 'tri') {
       if (it.fill !== triFill) { flushTris(); triFill = it.fill; g.beginPath(); }
@@ -863,37 +934,87 @@ function pushMesh(list, mesh, faces, col, P, eye) {
 }
 
 /* ================================================================== PANEL 3: LANES */
-const LANE = { labelW: 104, rowH: 16, gap: 8, top: 4, axisH: 22 };
+const LANE = { labelW: 104, rowH: 20, gap: 6, top: 4, axisH: 22, evH: 14, diagH: 11 };
+const TL = { predicted: '#5b6b80', lost: '#2c2f36', none: '#141413', reacq: '#e8e6e1', fail: C('--warning') };
 function laneFill(L, v) {
   if (L.kind === 'mask') return v === true ? { c: COLOR.good, a: 0.75 } : v === false ? { c: COLOR.critical, a: 0.75 } : null;
   if (L.kind === 'mesh') return v === 'all' ? { c: COLOR.good, a: 0.75 } : v === 'some' ? { c: COLOR.warning, a: 0.85 } : v === 'none' ? { c: COLOR.critical, a: 0.75 } : null;
   const col = COLOR[L.side] || COLOR.other;
-  if (v === 'observed') return { c: col, a: 1 };
-  if (v === 'reacquired') return { c: COLOR.ink, a: 1 };
-  if (v === 'predicted') return { c: col, a: 0.38 };
-  return null; // lost / none / retired: empty
+  if (v === 'observed' || v === 'reacquired') return { c: col, a: 1 };
+  if (v === 'predicted') return { c: TL.predicted, a: 0.9 };
+  if (v === 'lost') return { c: TL.lost, a: 1 };        // track kept but not detected (distinct from "no track")
+  return null;                                           // none / retired: no active track
 }
-function lanesGeom() { const n = S.lanes.length; return { h: LANE.top + n * (LANE.rowH + LANE.gap) + LANE.axisH }; }
-function xOfT(t, w) { return LANE.labelW + ((t - S.tStart) / (S.duration || 1)) * (w - LANE.labelW - 8); }
-function tOfX(x, w) { return clamp(S.tStart + ((x - LANE.labelW) / (w - LANE.labelW - 8)) * S.duration, S.tStart, S.tEnd); }
+// Visible window (zoom/pan). Timestamps are the run's own; zoom never changes them.
+function viewT0() { return S.view ? S.view.t0 : S.tStart; }
+function viewT1() { return S.view ? S.view.t1 : S.tEnd; }
+function setView(t0, t1) {
+  const full = S.tEnd - S.tStart, minSpan = Math.max(0.2, 4 / (S.fps || 30));
+  let span = clamp(t1 - t0, minSpan, full || minSpan);
+  t0 = clamp(t0, S.tStart, S.tEnd - span);
+  S.view = span >= full - 1e-9 ? null : { t0, t1: t0 + span }; S.dirty = true;
+}
+function zoomAt(t, factor) { const a = viewT0(), b = viewT1(); setView(t - (t - a) * factor, t + (b - t) * factor); }
+function laneRows() {
+  const rows = []; let y = LANE.top;
+  for (const L of S.lanes) if (L.kind === 'hand') { rows.push({ kind: 'lane', L, y, h: LANE.rowH }); y += LANE.rowH + LANE.gap; }
+  rows.push({ kind: 'events', y, h: LANE.evH }); y += LANE.evH + LANE.gap;
+  if (S.diagOpen) for (const L of S.lanes) if (L.kind !== 'hand') { rows.push({ kind: 'lane', L, y, h: LANE.diagH, diag: true }); y += LANE.diagH + 4; }
+  return { rows, axisY: y - LANE.gap + 4 };
+}
+function lanesGeom() { return { h: laneRows().axisY + LANE.axisH }; }
+function xOfT(t, w) { return LANE.labelW + ((t - viewT0()) / ((viewT1() - viewT0()) || 1)) * (w - LANE.labelW - 8); }
+function tOfX(x, w) { return clamp(viewT0() + ((x - LANE.labelW) / (w - LANE.labelW - 8)) * (viewT1() - viewT0()), S.tStart, S.tEnd); }
+const EV_STYLE = { hand_lost: { c: TL.fail, shape: 'tri', label: 'tracking failure' }, hand_reacquired: { c: TL.reacq, shape: 'dia', label: 'reacquired' },
+  hand_appeared: { c: '#9a988f', shape: 'tick', label: 'hand appeared' }, identity_unknown: { c: COLOR.other, shape: 'dot', label: 'side unknown' },
+  cam_space_invalid: { c: TL.fail, shape: 'sq', label: '3D unavailable' },
+  candidate_hold: { c: '#5fb3a8', shape: 'sq', label: 'candidate hold' }, candidate_movement: { c: '#8f8bd8', shape: 'tick', label: 'candidate movement' },
+  long_gap: { c: TL.fail, shape: 'tick', label: 'long tracking gap' } };
 function drawLanes() {
-  const cv = $('cvLanes'), { g, w, h } = fit(cv, lanesGeom().h);
-  g.clearRect(0, 0, w, h); g.font = '12px ' + C('--font');
-  S.lanes.forEach((L, k) => {
-    const y = LANE.top + k * (LANE.rowH + LANE.gap);
-    g.fillStyle = COLOR.ink2; g.textBaseline = 'middle'; g.fillText(L.label, 0, y + LANE.rowH / 2);
-    g.fillStyle = '#121211'; g.fillRect(LANE.labelW, y, w - LANE.labelW - 8, LANE.rowH);
-    for (const r of L.runs) {
-      const fl = laneFill(L, r.v); if (!fl) continue;
-      const x0 = xOfT(S.times[r.i0], w), x1 = xOfT(r.i1 < S.times.length ? S.times[r.i1] : S.tEnd, w);
-      g.globalAlpha = fl.a; g.fillStyle = fl.c; g.fillRect(x0 + 1, y, Math.max(1.5, x1 - x0 - 2), LANE.rowH); g.globalAlpha = 1;
+  const cv = $('cvLanes'), { rows, axisY } = laneRows(), { g, w, h } = fit(cv, axisY + LANE.axisH);
+  // Follow the playhead while playing in a zoomed view.
+  if (S.view && S.playing && (S.t > S.view.t1 || S.t < S.view.t0)) { const span = S.view.t1 - S.view.t0; setView(S.t - span * 0.1, S.t + span * 0.9); }
+  const t0 = viewT0(), t1 = viewT1(), x0v = LANE.labelW, x1v = w - 8;
+  g.clearRect(0, 0, w, h); g.font = '12px ' + C('--font'); g.textBaseline = 'middle';
+  S.eventMarks = [];
+  for (const row of rows) {
+    if (row.kind === 'events') {
+      g.fillStyle = COLOR.muted; g.font = '11px ' + C('--font'); g.fillText('Events', 0, row.y + row.h / 2);
+      g.fillStyle = '#101010'; g.fillRect(x0v, row.y, x1v - x0v, row.h);
+      for (const e of S.events || []) {
+        const st = EV_STYLE[e.type]; if (!st || e.start_s < t0 || e.start_s > t1) continue;
+        const x = xOfT(e.start_s, w), cy = row.y + row.h / 2; g.fillStyle = st.c;
+        g.beginPath();
+        if (st.shape === 'tri') { g.moveTo(x - 4, row.y + 2); g.lineTo(x + 4, row.y + 2); g.lineTo(x, row.y + row.h - 2); }
+        else if (st.shape === 'dia') { g.moveTo(x, row.y + 1); g.lineTo(x + 4, cy); g.lineTo(x, row.y + row.h - 1); g.lineTo(x - 4, cy); }
+        else if (st.shape === 'sq') g.rect(x - 2.5, cy - 2.5, 5, 5);
+        else if (st.shape === 'dot') g.arc(x, cy, 2.5, 0, Math.PI * 2);
+        else g.rect(x - 0.5, row.y + 3, 1, row.h - 6);
+        g.fill(); S.eventMarks.push({ x, e, y0: row.y, y1: row.y + row.h });
+      }
+      continue;
     }
-  });
-  // time axis
-  const yA = LANE.top + S.lanes.length * (LANE.rowH + LANE.gap) - LANE.gap + 4;
-  g.strokeStyle = COLOR.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(LANE.labelW, yA); g.lineTo(w - 8, yA); g.stroke();
-  drawTimeTicks(g, w, yA);
-  if (S.t >= S.tStart && S.t <= S.tEnd) drawPlayhead(g, xOfT(S.t, w), 0, yA, fmtT(S.t));
+    const L = row.L;
+    g.font = (row.diag ? '10px ' : '12px ') + C('--font'); g.fillStyle = row.diag ? COLOR.muted : COLOR.ink2;
+    g.fillText(L.label, 0, row.y + row.h / 2);
+    g.fillStyle = TL.none; g.fillRect(x0v, row.y, x1v - x0v, row.h);
+    for (const r of L.runs) {
+      const a = S.times[r.i0], b = r.i1 < S.times.length ? S.times[r.i1] : S.tEnd;
+      if (b < t0 || a > t1) continue;
+      const fl = laneFill(L, r.v); if (!fl) continue;
+      const xa = Math.max(x0v, xOfT(a, w)), xb = Math.min(x1v, xOfT(b, w));
+      g.globalAlpha = fl.a; g.fillStyle = fl.c; g.fillRect(xa, row.y, Math.max(1.5, xb - xa - (xb - xa > 3 ? 1 : 0)), row.h); g.globalAlpha = 1;
+      if (L.kind === 'hand' && r.v === 'reacquired') { g.fillStyle = TL.reacq; g.fillRect(xa, row.y, 2, row.h); }
+    }
+  }
+  g.strokeStyle = COLOR.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(x0v, axisY); g.lineTo(x1v, axisY); g.stroke();
+  drawTimeTicks(g, w, axisY);
+  if (S.selection && S.selection.t1 >= t0 && S.selection.t0 <= t1) {        // selected segment outline
+    const sr = rows.find((r) => r.kind === 'lane' && r.L.key === S.selection.laneKey);
+    if (sr) { const xa = Math.max(x0v, xOfT(S.selection.t0, w)), xb = Math.min(x1v, xOfT(S.selection.t1, w)); g.strokeStyle = COLOR.ink; g.lineWidth = 1.5; g.strokeRect(xa, sr.y - 1, Math.max(3, xb - xa), sr.h + 2); }
+  }
+  if (S.t >= t0 && S.t <= t1) drawPlayhead(g, xOfT(S.t, w), 0, axisY, fmtT(S.t));
+  const rng = $('tlRange'); if (rng) rng.textContent = S.view ? `zoom ${fmtS(t0)}–${fmtS(t1)} (${num(t1 - t0, 1)} s of ${num(S.tEnd - S.tStart, 1)} s)` : `full run · ${num(S.tEnd - S.tStart, 1)} s`;
 }
 function drawPlayhead(g, x, y0, y1, label) {
   g.strokeStyle = COLOR.ink; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke();
@@ -901,8 +1022,8 @@ function drawPlayhead(g, x, y0, y1, label) {
 }
 function drawTimeTicks(g, w, yA) {
   g.fillStyle = COLOR.muted; g.font = '11px ' + C('--font'); g.textBaseline = 'top';
-  const step = niceStep(S.duration / 8);
-  for (let t = Math.ceil(S.tStart / step - 1e-9) * step; t <= S.tEnd + 1e-6; t += step) {
+  const t0 = viewT0(), t1 = viewT1(), step = niceStep((t1 - t0) / 8);
+  for (let t = Math.ceil(t0 / step - 1e-9) * step; t <= t1 + 1e-6; t += step) {
     const x = xOfT(t, w), lab = fmtS(t), tw = g.measureText(lab).width;
     g.fillRect(x, yA, 1, 4); g.fillText(lab, clamp(x - tw / 2, LANE.labelW - 4, w - tw - 2), yA + 6);
   }
@@ -940,11 +1061,13 @@ function drawSignals() {
     g.textBaseline = 'middle'; g.fillStyle = COLOR.muted;
     for (const v of [lo, (lo + hi) / 2, hi]) { const y = Y(v); g.fillStyle = COLOR.grid; g.fillRect(LANE.labelW, y, w - LANE.labelW - 8, 1); g.fillStyle = COLOR.muted; g.textAlign = 'right'; g.fillText(num(v, d.key === 'reproj' ? 0 : 2), LANE.labelW - 8, y); g.textAlign = 'left'; }
     if (d.band) { const ya = Y(d.band[1]), yb = Y(d.band[0]); g.fillStyle = 'rgba(240,239,236,0.06)'; g.fillRect(LANE.labelW, ya, w - LANE.labelW - 8, yb - ya); }
+    g.save(); g.beginPath(); g.rect(LANE.labelW, 0, w - LANE.labelW - 8, h); g.clip();
     for (const side of WEARER) {
       const arr = S.series[side][d.key]; g.strokeStyle = COLOR[side]; g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath(); let pen = false;
       for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v == null) { pen = false; continue; } const x = xOfT(S.times[i], w), y = Y(v); if (!pen) { g.moveTo(x, y); pen = true; } else g.lineTo(x, y); }
       g.stroke();
     }
+    g.restore();
   });
   const yA = SG.top + defs.length * (SG.rowH + SG.gap) - SG.gap + 4;
   g.strokeStyle = COLOR.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(LANE.labelW, yA); g.lineTo(w - 8, yA); g.stroke();
@@ -966,7 +1089,21 @@ function tipRow(parent, color, value, label, kind = 'line') {
   const row = el('div', { class: 'row' }); const k = el('i', { class: kind === 'line' ? 'key-line' : 'key-rect' }); k.style.background = color;
   row.append(k, el('b', {}, value), el('span', { class: 'lab' }, label)); parent.append(row);
 }
-function laneTip(ev, i) {
+function laneTip(ev, i, hit) {
+  if (hit && hit.event) { showTip(ev, (t) => { t.append(el('div', { class: 't' }, `${fmtT(hit.event.start_s)} · ${hit.event.label}`)); tipRow(t, (EV_STYLE[hit.event.type] || {}).c || COLOR.muted, `${num(hit.event.end_s - hit.event.start_s, 2)} s`, 'duration', 'rect'); }); return; }
+  if (hit && hit.L && hit.run && hit.L.kind === 'hand') {
+    const { t0, t1, hnd } = segmentInfo(hit.L, hit.run);
+    showTip(ev, (t) => {
+      t.append(el('div', { class: 't' }, `${hit.L.label} · ${hit.run.v === 'none' || hit.run.v === 'retired' ? 'no track' : hit.run.v}`));
+      tipRow(t, COLOR[hit.L.side] || COLOR.other, `${fmtS(t0)}–${fmtS(t1)}`, `${num(t1 - t0, 2)} s`, 'rect');
+      if (hnd) {
+        tipRow(t, COLOR.muted, `#${hnd.track_id}`, 'track', 'rect');
+        tipRow(t, COLOR.muted, (hnd.detection_origin_detail || hnd.detection_origin || '—').replace(/_/g, ' '), 'detected by', 'rect');
+        tipRow(t, COLOR.muted, hnd.cam_xyz_m ? 'approx. camera-space' : 'none', '3D', 'rect');
+      }
+    });
+    return;
+  }
   showTip(ev, (t) => {
     t.append(el('div', { class: 't' }, `${fmtT(S.times[i])} · frame ${S.frames[i].frame_index}`));
     for (const L of S.lanes) {
@@ -1003,25 +1140,88 @@ function renderChips() {
     : S.frames.some((f) => f.hands.some((h) => h.cam_xyz_m)) ? 'Camera space from the file · lens not recorded' : 'Camera space · no 3D loaded'); c.append(m);
 }
 function renderBreakdown() {
+  // Percentages from the frame-level lane states (observed includes reacquired).
   const b = $('breakdown'); b.replaceChildren();
-  for (const r of S.breakdown) {
-    const col = COLOR[r.side];
-    b.append(el('span', { class: 'name' }, r.label));
-    const bar = el('div', { class: 'bar', role: 'img', 'aria-label': `${r.label}: tracked ${(r.tracked * 100).toFixed(0)}%, predicted ${(r.predicted * 100).toFixed(0)}%, not tracked ${(r.missing * 100).toFixed(0)}%` });
-    const part = (frac, style) => { if (frac <= 0) return; const d = el('div'); d.style.flex = String(frac); Object.assign(d.style, style); bar.append(d); };
-    part(r.tracked, { background: col });
-    part(r.predicted, { background: col, opacity: '0.38' });
-    part(r.missing, { background: '#121211', outline: `1px solid ${COLOR.axis}`, outlineOffset: '-1px' });
-    b.append(bar);
-    b.append(el('span', { class: 'bar-labels' }, `tracked ${(r.tracked * 100).toFixed(0)}% · predicted ${(r.predicted * 100).toFixed(0)}% · not tracked ${(r.missing * 100).toFixed(0)}%`));
+  for (const L of S.lanes) if (L.kind === 'hand') {
+    const n = L.values.length || 1, c = { obs: 0, pred: 0, lost: 0, none: 0 };
+    for (const v of L.values) { if (HAS_3D.has(v)) c.obs++; else if (v === 'predicted') c.pred++; else if (v === 'lost') c.lost++; else c.none++; }
+    const pc = (k) => `${(100 * c[k] / n).toFixed(0)}%`;
+    const sp = el('span'); sp.append(el('b', {}, L.label), document.createTextNode(` observed ${pc('obs')} · predicted ${pc('pred')} · lost ${pc('lost')} · no track ${pc('none')}`)); b.append(sp);
   }
   const lg = $('lanesLegend'); lg.replaceChildren();
   const item = (style, text) => { const s = el('span'); const k = el('i', { class: 'key-rect' }); Object.assign(k.style, style); s.append(k, document.createTextNode(text)); lg.append(s); };
-  item({ background: COLOR.wearer_left }, 'observed (left)'); item({ background: COLOR.wearer_right }, 'observed (right)');
-  item({ background: COLOR.ink }, 'reacquired'); item({ background: COLOR.wearer_right, opacity: '0.38' }, 'predicted · 2D only');
-  item({ background: '#121211', outline: `1px solid ${COLOR.axis}` }, 'lost / not in view');
-  if (S.lanes.some((L) => L.kind === 'mask' || L.kind === 'mesh')) { item({ background: COLOR.good, opacity: '0.75' }, '✓ mask true'); item({ background: COLOR.critical, opacity: '0.75' }, '✕ mask false'); }
-  if (S.mesh) item({ background: COLOR.warning, opacity: '0.85' }, 'mesh for some hands only');
+  item({ background: COLOR.wearer_left }, 'left observed'); item({ background: COLOR.wearer_right }, 'right observed');
+  if (S.lanes.some((L) => L.side === 'unknown')) item({ background: COLOR.unknown }, 'side unknown');
+  item({ background: TL.predicted }, 'predicted (2D only)'); item({ background: TL.lost, outline: `1px solid ${COLOR.axis}` }, 'lost (track kept, not detected)');
+  item({ background: TL.none, outline: `1px solid ${COLOR.axis}` }, 'no track'); item({ background: TL.reacq }, 'reacquired');
+  item({ background: TL.fail }, 'failure / 3D unavailable');
+  if (S.diagOpen) { item({ background: COLOR.good, opacity: '0.75' }, '✓ diagnostic true'); item({ background: COLOR.critical, opacity: '0.75' }, '✕ diagnostic false'); }
+}
+// Hit-testing and the inspection panel for the timeline.
+function laneHit(x, y, w) {
+  const { rows } = laneRows(), t = tOfX(x, w), i = indexAt(t);
+  const row = rows.find((r) => y >= r.y - 2 && y <= r.y + r.h + 2);
+  if (!row) return { t, i };
+  if (row.kind === 'events') {
+    let best = null; for (const m of S.eventMarks || []) { const d = Math.abs(m.x - x); if (d <= 6 && (!best || d < best.d)) best = { d, e: m.e }; }
+    return { t, i, event: best && best.e };
+  }
+  const run = row.L.runs.find((r) => i >= r.i0 && i < r.i1);
+  return { t, i, L: row.L, run };
+}
+function segmentInfo(L, run) {
+  const t0 = S.times[run.i0], t1 = run.i1 < S.times.length ? S.times[run.i1] : S.tEnd;
+  const mid = S.frames[run.i0], hnd = L.kind === 'hand' ? handFor(mid, L.side) : null;
+  return { t0, t1, hnd };
+}
+function selectAt(hit) {
+  if (hit.event) { seek(hit.event.start_s); S.selection = { laneKey: null, t0: hit.event.start_s, t1: hit.event.end_s, event: hit.event }; }
+  else if (hit.L && hit.run) { const { t0, t1 } = segmentInfo(hit.L, hit.run); seek(hit.t); S.selection = { laneKey: hit.L.key, L: hit.L, run: hit.run, t0, t1 }; }
+  else { seek(hit.t); S.selection = null; }
+  renderSelection(); S.dirty = true;
+}
+function renderSelection() {
+  const box = $('tlSelection'); box.replaceChildren();
+  const sel = S.selection; if (!sel) { box.hidden = true; return; }
+  box.hidden = false;
+  const f = S.frames[S.idx], add = (k, v, cls) => { const d = el('div', cls ? { class: cls } : {}); d.append(el('span', { class: 'k' }, k + ': '), document.createTextNode(v)); box.append(d); };
+  add('Time', `${fmtT(S.t)} · frame ${f ? f.frame_index : '—'}`);
+  add('Video / run', S.clipId || '—');
+  add('Segment', `${fmtS(sel.t0)}–${fmtS(sel.t1)} (${num(sel.t1 - sel.t0, 2)} s)`);
+  if (sel.event) add('Event', sel.event.label);
+  const mev = sel.event && sel.event.motion;
+  if (mev) {
+    add('Evidence frames', mev.evidence_frames.join(', '));
+    add('Basis', `${mev.basis} · status ${mev.status} (not validated)`);
+    if (mev.quality_flags.length) add('Quality flags', mev.quality_flags.join(', '), 'warn');
+  }
+  const hnd = sel.L && f ? handFor(f, sel.L.side) : null;
+  if (sel.L) add('Lane', sel.L.label);
+  if (hnd) {
+    add('Track', `#${hnd.track_id}`);
+    add('Side', `${SIDE_LABEL[hnd.anatomical_side] || hnd.anatomical_side} (${hnd._side_source || hnd.side_source || 'n/a'})`);
+    add('State', hnd.state + (hnd.state === 'predicted' ? ' — 2D extrapolation, not an observation' : ''), hnd.state === 'observed' || hnd.state === 'reacquired' ? '' : 'warn');
+    add('Detection', (hnd.detection_origin_detail || hnd.detection_origin || '—').replace(/_/g, ' '));
+    add('Landmarks', hnd.landmark_source || (hnd.observed ? 'mediapipe' : '—'));
+    add('3D', hnd.cam_xyz_m ? `approx. camera-space (assumed lens) from ${hnd.world_source === 'fitted_from_2d' ? 'fitted-from-2D shape' : 'MediaPipe hand-relative 3D'}` : HAS_3D.has(hnd.state) ? 'none for this frame' : 'none (not observed)', hnd.cam_xyz_m ? '' : 'warn');
+    if (hnd.missing_reason) add('Why missing', `${hnd.missing_reason} (inferred)`, 'warn');
+  } else if (sel.L) add('Hand', 'no track at this time', 'warn');
+  const act = el('div', { class: 'actions' });
+  const btn = (label, fn) => { const b = el('button', { class: 'btn' }, label); b.addEventListener('click', fn); act.append(b); };
+  btn('Play segment', () => { seek(sel.t0); setPlaying(true); });
+  btn('Zoom to segment', () => { const pad = Math.max(0.5, (sel.t1 - sel.t0) * 0.3); setView(sel.t0 - pad, sel.t1 + pad); });
+  if (mev && window.EgoHandReview) {
+    btn('Confirm', () => window.EgoHandReview(mev, 'confirmed_issue'));
+    btn('Reject', () => window.EgoHandReview(mev, 'false_alarm'));
+  }
+  btn('Close (Esc)', () => { S.selection = null; renderSelection(); S.dirty = true; });
+  box.append(act);
+}
+function jumpEvent(types, dir) {
+  const evs = (S.events || []).filter((e) => types.includes(e.type)).map((e) => e.start_s).sort((a, b) => a - b);
+  const t = dir > 0 ? evs.find((x) => x > S.t + 1e-3) : [...evs].reverse().find((x) => x < S.t - 1e-3);
+  if (t == null) { toast(dir > 0 ? 'No later event of this kind.' : 'No earlier event of this kind.'); return; }
+  seek(t); if (S.view && (t < S.view.t0 || t > S.view.t1)) { const span = S.view.t1 - S.view.t0; setView(t - span / 2, t + span / 2); }
 }
 function renderInspector() {
   const f = S.frames[S.idx], box = $('inspector'); box.replaceChildren(); if (!f) return;
@@ -1034,10 +1234,15 @@ function renderInspector() {
   for (const [k, lab] of [['hand_observed', 'Hand observed'], ['low_blur', 'Low blur'], ['cam_space_valid', '3D valid']])
     if (k === 'hand_observed' || S.lanes.some((L) => L.key === k)) kv(lab, m[k] === true ? '✓ yes' : m[k] === false ? '✕ no' : 'n/a', m[k] === true ? 'ok' : m[k] === false ? 'bad' : 'na');
   t1.append(tb1); box.append(t1);
-  const hands = (f.hands || []).filter((h) => h.state !== 'retired');
+  // Lost tracks are kept by the tracker for re-identification but are not hands on screen: listing them as
+  // columns read as "several left hands at once". They get a one-line note instead (see below the table).
+  const hands = (f.hands || []).filter((h) => h.state !== 'retired' && h.state !== 'lost');
+  const lostNote = (f.hands || []).filter((h) => h.state === 'lost')
+    .map((h) => `#${h.track_id} ${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} (${num(h.seconds_since_observed, 1)} s)`).join(', ');
   const t2 = el('table', { class: 'inspect' }); t2.style.marginTop = '10px';
   const head = el('tr'); head.append(el('th', {}, 'Field')); for (const h of hands) { const th = el('th'); const d = el('span', { class: 'dot' }); d.style.background = COLOR[h.anatomical_side] || COLOR.other; th.append(d, document.createTextNode(`${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} #${h.track_id}`)); head.append(th); }
   const tb = el('tbody'); t2.append(el('thead'), tb); t2.tHead.append(head);
+  if (lostNote) box.append(el('p', { class: 'note' }, `Lost tracks (not visible, kept for re-identification): ${lostNote}`));
   if (!hands.length) { box.append(el('p', { class: 'note' }, 'No hands in this frame.')); return; }
   const rows = [
     ['State', null, (h) => h.state], ['Detected by', null, (h) => h.detection_origin ? h.detection_origin.replace(/_/g, ' ') : '—'],
@@ -1214,6 +1419,7 @@ function applyIdentity(obj) {
   let updated = 0, kept = 0, undecided = 0;
   for (const f of S.frames) for (const h of f.hands) {
     if (h._side_source !== 'tracker (online)' && h._side_source !== 'unavailable') { kept++; continue; }
+    if (h.side_source === 'unknown_conflicts_with_simultaneous_hand') { kept++; continue; }   // never re-create a same-side pair
     const vote = map[(obj.tracks[String(h.track_id)] || {}).side_vote];
     if (!vote) { undecided++; continue; }
     h.anatomical_side = vote; h._side_source = 'whole-track vote';
@@ -1366,6 +1572,7 @@ function loadFrames(frames, { synthetic, clipId }) {
   $('lblResults').setAttribute('aria-disabled', String(synthetic));
   updateVideoBadge();
   S.mesh = null;   // meshes come only from a loaded mesh file; there is no synthetic stand-in
+  S.view = null; S.selection = null; renderSelection();
   deriveAll(); seek(S.tStart); renderChips(); renderBreakdown(); renderEvents(); updateThreeBadge(); renderMeshNote();
   $('footer').textContent = synthetic
     ? 'Prototype. With the synthetic demo data, every value on screen is made up to show the layout, and none of it is a measurement.'
@@ -1446,6 +1653,32 @@ $('btnFwd').addEventListener('click', () => stepFrame(1));
 $('selSpeed').addEventListener('change', (e) => { S.speed = +e.target.value; if (S.video) S.video.playbackRate = S.speed; });
 function bindSeg(id, fn) { const g = $(id); g.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; for (const x of g.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); fn(b.dataset.v); }); }
 bindSeg('segMode', (v) => { S.mode = v; updateThreeBadge(); renderChips(); S.dirty = true; });
+function setWorkspace(v) {
+  document.body.classList.remove('ws-review', 'ws-analysis', 'ws-diagnostics'); document.body.classList.add('ws-' + v);
+  if (v !== 'analysis') $('tlDiag').checked = v === 'diagnostics';     // diagnostics lanes: on in Diagnostics, off in Review
+  S.diagOpen = $('tlDiag').checked; $('p-signals').hidden = !(S.diagOpen || v === 'analysis');
+  renderBreakdown(); S.dirty = true;
+}
+bindSeg('segWorkspace', setWorkspace);
+function setSplit(f) {
+  f = clamp(f, 0.2, 0.8); const m = document.querySelector('main').style;
+  m.setProperty('--col-video', `${(2 * f).toFixed(3)}fr`); m.setProperty('--col-three', `${(2 - 2 * f).toFixed(3)}fr`); S.dirty = true;
+}
+bindSeg('segLayout', (v) => setSplit(+v));
+(() => {
+  const h = $('splitHandle'), main = document.querySelector('main'); let drag = false;
+  h.addEventListener('pointerdown', (e) => { drag = true; h.classList.add('drag'); h.setPointerCapture(e.pointerId); });
+  h.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const v = $('p-video').getBoundingClientRect(), t = $('p-three').getBoundingClientRect();
+    setSplit((e.clientX - v.left) / (t.right - v.left));
+  });
+  h.addEventListener('pointerup', () => { drag = false; h.classList.remove('drag'); });
+})();
+$('chkWire').addEventListener('change', (e) => { S.wireframe = e.target.checked; S.dirty = true; });
+$('rngOpacity').addEventListener('input', (e) => { S.meshOpacity = +e.target.value; S.dirty = true; });
+$('btnCamReset').addEventListener('click', () => { S.orbit = { yaw: -0.12, pitch: 0.62, dist: 0.9 }; S.dirty = true; });
+document.body.classList.add('ws-review');
 bindSeg('segSmooth', (v) => { S.smooth = v === 'smooth'; S.dirty = true; });
 bindSeg('segDisplay', (v) => { S.display = v; S.dirty = true; });
 bindSeg('segEvents', (v) => { S.eventFilter = v; renderEvents(); S.dirty = true; });
@@ -1455,10 +1688,17 @@ $('expJsonl').addEventListener('click', exportJsonl);
 $('expAria').addEventListener('click', exportAria);
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea')) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.code === 'Space') { e.preventDefault(); setPlaying(!S.playing); }
-  else if (e.code === 'ArrowLeft') stepFrame(-1);
-  else if (e.code === 'ArrowRight') stepFrame(1);
+  else if (e.code === 'ArrowLeft') { e.preventDefault(); if (e.shiftKey) seek(clamp(S.t - 1, S.tStart, S.tEnd)); else if (!S.playing) stepFrame(-1); }
+  else if (e.code === 'ArrowRight') { e.preventDefault(); if (e.shiftKey) seek(clamp(S.t + 1, S.tStart, S.tEnd)); else if (!S.playing) stepFrame(1); }
   else if (e.code === 'Home') seek(S.tStart);
+  else if (e.key === '+' || e.key === '=') zoomAt(S.t, 0.5);
+  else if (e.key === '-' || e.key === '_') zoomAt(S.t, 2);
+  else if (e.key === '0') setView(S.tStart, S.tEnd);
+  else if (e.key === 'f' || e.key === 'F') jumpEvent(['hand_lost'], e.shiftKey ? -1 : 1);
+  else if (e.key === 'r' || e.key === 'R') jumpEvent(['hand_reacquired'], e.shiftKey ? -1 : 1);
+  else if (e.key === 'Escape') { S.selection = null; renderSelection(); S.dirty = true; }
 });
 // Orbit / zoom for the 3D panel
 (() => {
@@ -1469,7 +1709,52 @@ document.addEventListener('keydown', (e) => {
   cv.addEventListener('wheel', (e) => { e.preventDefault(); S.orbit.dist = clamp(S.orbit.dist * Math.exp(e.deltaY * 0.001), 0.4, 4); S.dirty = true; }, { passive: false });
   cv.addEventListener('dblclick', () => { S.orbit = { yaw: -0.12, pitch: 0.62, dist: 0.9 }; S.dirty = true; });
 })();
-bindChart($('cvLanes'), (ev, i) => laneTip(ev, i));
+(() => {
+  const cv = $('cvLanes'); let drag = null, pending = null;
+  const pos = (ev) => { const r = cv.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top, w: r.width }; };
+  const applyScrub = () => { if (pending != null) { seek(pending); pending = null; } if (drag) requestAnimationFrame(applyScrub); };
+  cv.addEventListener('pointerdown', (ev) => {
+    const p = pos(ev); if (p.x < LANE.labelW) return;
+    const onAxis = p.y >= laneRows().axisY - 2;
+    drag = { x0: p.x, moved: false, pan: onAxis || ev.shiftKey, v0: viewT0(), v1: viewT1(), w: p.w };
+    cv.setPointerCapture(ev.pointerId);
+    if (!drag.pan) requestAnimationFrame(applyScrub);
+  });
+  cv.addEventListener('pointermove', (ev) => {
+    const p = pos(ev);
+    if (drag) {
+      if (Math.abs(p.x - drag.x0) > 3) drag.moved = true;
+      if (!drag.moved) return;
+      hideTip();
+      if (drag.pan) { const dt = (p.x - drag.x0) / (drag.w - LANE.labelW - 8) * (drag.v1 - drag.v0); setView(drag.v0 - dt, drag.v1 - dt); }
+      else pending = tOfX(p.x, p.w);                               // scrub: at most one seek per frame
+      return;
+    }
+    if (p.x < LANE.labelW) { hideTip(); return; }
+    const hit = laneHit(p.x, p.y, p.w); laneTip(ev, hit.i, hit);
+  });
+  cv.addEventListener('pointerup', (ev) => {
+    const p = pos(ev), d = drag; drag = null;
+    if (d && !d.moved && p.x >= LANE.labelW) selectAt(laneHit(p.x, p.y, p.w));
+    else if (pending != null) { seek(pending); pending = null; }
+  });
+  cv.addEventListener('pointerleave', () => hideTip());
+  cv.addEventListener('wheel', (ev) => {
+    const p = pos(ev); if (p.x < LANE.labelW) return; ev.preventDefault();
+    if (ev.shiftKey || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) { const span = viewT1() - viewT0(), dt = ((ev.shiftKey ? ev.deltaY : ev.deltaX) / 600) * span; setView(viewT0() + dt, viewT1() + dt); }
+    else zoomAt(tOfX(p.x, p.w), Math.exp(ev.deltaY * 0.0015));
+  }, { passive: false });
+  cv.addEventListener('dblclick', () => setView(S.tStart, S.tEnd));
+  $('tlZoomIn').addEventListener('click', () => zoomAt(S.t, 0.5));
+  $('tlZoomOut').addEventListener('click', () => zoomAt(S.t, 2));
+  $('tlFit').addEventListener('click', () => setView(S.tStart, S.tEnd));
+  $('tlNextFail').addEventListener('click', () => jumpEvent(['hand_lost'], 1));
+  $('tlPrevFail').addEventListener('click', () => jumpEvent(['hand_lost'], -1));
+  $('tlNextReacq').addEventListener('click', () => jumpEvent(['hand_reacquired'], 1));
+  $('tlPrevReacq').addEventListener('click', () => jumpEvent(['hand_reacquired'], -1));
+  $('tlDiag').addEventListener('change', (e) => { S.diagOpen = e.target.checked; $('p-signals').hidden = !S.diagOpen; renderBreakdown(); S.dirty = true; });
+  $('p-signals').hidden = true;                                    // diagnostics are collapsed by default
+})();
 bindChart($('cvSignals'), (ev, i) => { S.hoverSig = i; S.dirty = true; sigTip(ev, i); }, () => { S.hoverSig = null; S.dirty = true; });
 new ResizeObserver(() => (S.dirty = true)).observe(document.body);
 
@@ -1477,14 +1762,21 @@ new ResizeObserver(() => (S.dirty = true)).observe(document.body);
 let lastIdx = -1;
 function tick(now) {
   if (S.playing) {
+    const before = S.t;
     if (S.video && S.video.ended) setPlaying(false);
     else {
-      if (S.video && !S.video.paused) S.t = S.video.currentTime + (S.videoOffset || 0);   // videoOffset: video starts at run time videoOffset (backend proxy); 0 for local files
+      // One clock: the media time of the frame the browser actually PRESENTED (requestVideoFrameCallback).
+      // video.currentTime runs ahead of the displayed frame, which drew landmarks of a different frame than
+      // the image underneath (measured: 173 of 179 presented frames). videoOffset: proxy starts at run time videoOffset.
+      if (S.video && !S.video.paused) S.t = (S.presentedT ?? S.video.currentTime) + (S.videoOffset || 0);
       else S.t += ((now - S.lastTick) / 1000) * S.speed;
       S.lastTick = now;
       if (S.t >= S.tEnd) { S.t = S.tEnd - 1e-3; setPlaying(false); }
     }
-    S.idx = indexAt(S.t); S.dirty = true;
+    S.idx = indexAt(S.t);
+    // Redraw only when the shown time changed: with a video this is once per PRESENTED frame (30/s),
+    // not on every display refresh (60/s), which halved the drawing work during playback.
+    if (S.t !== before) S.dirty = true;
   }
   if (S.dirty) {
     drawVideo(); drawThree(); drawLanes(); drawSignals(); renderHeader();
@@ -1498,6 +1790,7 @@ loadFrames(makeSynthetic(), { synthetic: true, clipId: 'synthetic_demo' });
 seek(6.0);
 requestAnimationFrame(tick);
 </script>
+<script src="hand-mesh.js"></script>
 <script src="backend-connector.js"></script>
 </body>
 </html>

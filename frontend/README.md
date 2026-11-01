@@ -38,6 +38,10 @@ Opened as a file (`file://`), the page stays fully offline: `backend-connector.j
 - **Load video:** plays a local clip in sync, using `timestamp_s`. When paused, the skeleton snaps to the frame the video shows; frame stepping seeks to the middle of each frame. No hand overlay is drawn outside the run's time range. The file is never uploaded. With the synthetic demo the video badge says that the overlay is synthetic.
 - Do not commit real outputs or screenshots of real footage. `*.jsonl` and media files are already git-ignored.
 
+### Generated hand surfaces (backend runs)
+
+When a run is loaded from the local backend and it has camera-space 3D, `backend-connector.js` builds a low-poly hand surface for every observed hand with `hand-mesh.js`: 16 tapered capsules along the finger bones plus a palm slab, placed on the lifted joints (432 vertices, 796 triangles, one shared face list, every part wound outward). Finger and palm thickness are typical adult sizes scaled by the measured wrist-to-middle-knuckle length. It is labelled as generated, not fitted; a WiLoR/HaMeR mesh file added later replaces it.
+
 ### Mesh file format (what the mesh step should write)
 
 Vertices must already be in **camera-frame metres** (x right, y down, z forward), placed by the pipeline (for example by re-running `lift.solve_hand` with the MANO joints). The viewer never places meshes itself.

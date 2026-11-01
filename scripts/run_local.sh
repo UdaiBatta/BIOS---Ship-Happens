@@ -15,9 +15,10 @@ need ffmpeg "Install FFmpeg (macOS: brew install ffmpeg; Debian/Ubuntu: sudo apt
 need ffprobe "Install FFmpeg (it provides ffprobe)"
 
 echo "==> Installing dependencies"
-uv sync --extra dev --extra viewer --extra backend
+uv sync --extra dev --extra viewer --extra backend --extra hybrid
 uv run egohand fetch-model >/dev/null
 uv run rerun analytics disable >/dev/null 2>&1 || true
+uv run egohand fetch-model --rtm >/dev/null 2>&1 || echo "    (optional RTM hand models not downloaded; the experimental hybrid preset stays hidden)"
 uv run egohand doctor | grep -E '"mediapipe_runtime"' || true
 
 if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.m4v" -o -iname "*.webm" \) 2>/dev/null | grep -q .; then
@@ -28,6 +29,14 @@ if [ ! -f "$CLIP" ] && ! find media -type f \( -iname "*.mp4" -o -iname "*.mov" 
   (cd "$TMP" && grep ps4-source-video.zip SHA256SUMS | (shasum -a 256 -c - 2>/dev/null || sha256sum -c -))
   uv run python -m zipfile -e "$TMP/ps4-source-video.zip" .
   rm -rf "${TMP:?}"
+fi
+
+# A server or worker left over from an earlier launch keeps running OLD code; stop it first.
+OLD=$(pgrep -f "manage.py (runserver 127.0.0.1:8000|egohand_worker)" || true)
+if [ -n "$OLD" ]; then
+  echo "==> Stopping EgoHand server/worker process(es) from an earlier launch: $OLD"
+  kill $OLD 2>/dev/null || true
+  sleep 2
 fi
 
 echo "==> Preparing the backend database"

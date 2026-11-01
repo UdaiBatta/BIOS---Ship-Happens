@@ -17,6 +17,7 @@ Measured on one clip (one of four recording families) with **provisional labels*
 | --- | --- |
 | Landmarks, tracking (observed / predicted 2D-only / lost / retired), raw + filtered exports, Rerun replay | Implemented, verified on real footage |
 | Detection recovery, `--preset recall` (thresholds 0.3 + centre-crop rescue) | Holdout visible-hand recall 19/78 → 39/78, precision 39/40; more track fragmentation (2.17 vs 1.60 IDs per hand) |
+| `--preset accurate` (recall + a reverse-time detection pass) | Holdout recall 39/78 → 46/78, precision 46/48; dev 36/72 → 41/72 with no false positives; about 2× detector time; no gain on hands cut off at the bottom edge |
 | Quality windows, review queue, segment export, Rerun quality timeline | Implemented; heuristic. Flags catch 22/35 missed-hand frames on holdout; about 12 review items per minute |
 | Reliability in replay: state lanes, side probability, `missing_reason`, units | Implemented; `out_of_view` contradicted in 6/15 holdout cases, so treat it as a hint |
 | Same-moment flat-vs-3D image, `steps.json` step markers with sign-off | Implemented; whether 3D helps users is **not measured** |
@@ -24,7 +25,10 @@ Measured on one clip (one of four recording families) with **provisional labels*
 | Faster processing | 30 s clip end-to-end 129 s → 57 s (verified packet timestamps). Parallel chunked detection (`--workers 2`): 63 s → 50 s for the recall preset, identical detections |
 | Django backend API with job worker | Implemented; 9 backend tests; endpoints answer in 5–32 ms once a run is indexed |
 | Camera-space PnP lift (`egohand lift`) | **Experimental**: assumed lens; depth moves ±25% with the assumed FOV |
-| Meshes, robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
+| `--preset hybrid` (experimental accuracy mode: RTMPose recovers hands near a recently tracked hand that MediaPipe lost) | Holdout recall 39/78 → 47/78 but precision 0.975 → 0.887 and 2.6× time: **no-go as default** by the pre-set rule; `accurate` has better F1 (0.730 vs 0.718) ([EXPERIMENT_RESULTS](docs/EXPERIMENT_RESULTS.md)) |
+| Left/right flicker fix (crop detections keep the track's side, hysteresis, `unknown` instead of guessing) | Holdout wrong sides 11 → 5 of 49, Left↔Right flips 8 → 2, flicker within tracks 29 → 3; 12 hands now say `unknown` ([HANDEDNESS_ROOT_CAUSE](docs/HANDEDNESS_ROOT_CAUSE.md)) |
+| Solid 3D hands in the viewer | Low-poly surface (432 vertices) generated from the 21 lifted joints when a backend run loads: rounded fingers and a palm slab, typical thickness scaled to the measured palm. **Not a fitted hand-shape model** (no MANO/WiLoR); same assumed-lens depth caveats |
+| Fitted meshes (MANO/WiLoR), robot export, bone calibration, privacy flags, action events, user tests | Not implemented — [TODO](docs/TODO.md) |
 
 ## Quick start
 

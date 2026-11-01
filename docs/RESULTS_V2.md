@@ -215,3 +215,35 @@ uv run egohand replay $V runs/dev_chosen --out runs/dev_chosen/review.rrd --qual
 ```
 
 The bake-off scripts used for the tables are wrappers around these commands; the configuration names map to the flags in §2. Runs, labels and recordings stay in `data/` and `runs/`, which are git-ignored and private.
+
+## Reverse-time detection pass (`--preset accurate`, 31 Oct 2026)
+
+MediaPipe's landmark model sees one frame at a time; its VIDEO mode only carries the previous frame's hand region forward. Because runs are offline, a second detection pass runs **backwards in time** (bounded memory: 300-frame segments, each warmed up on the 30 frames after it), and hands it finds that the forward pass missed are added (forward results take precedence; duplicates by the landmark rule). Same host, same clip, provisional labels:
+
+| Split | recall (forward) | recall + backward pass | Precision | Notes |
+| --- | ---: | ---: | --- | --- |
+| dev (choice) | 36/72 | **41/72** | 36/36 → 41/41 | Identical with the full pipeline, 2 workers, converged seam |
+| holdout (once) | 39/78 | **46/78** | 39/40 → 46/48 | full 27/46 → 34/46; truncated unchanged 7/23 |
+
+Cost: detector time about doubles (30 s of 1080p: 101 s end to end with 2 workers on 4 vCPUs). It does not help hands cut off at the bottom edge. The default stays `baseline`; the viewer's default stays `recall`.
+
+## Hybrid detector: RTMDet hand boxes + MediaPipe / RTMPose (`--preset hybrid`, experimental, 31 Oct 2026)
+
+Idea: MediaPipe finds hands with a palm detector, which misses hidden palms. RTMDet-nano (hand) proposes whole-hand boxes; MediaPipe reads each new box (21 points, 3D, side); where it still fails, RTMPose-m (hand) gives 2D points and `handfit` adds depth from the median MediaPipe hand. Models: OpenMMLab ONNX, Apache-2.0, onnxruntime on CPU; archives SHA-256-verified.
+
+| Check (dev, provisional labels, one clip) | Result |
+| --- | --- |
+| RTMDet box at a labelled hand, whole 960 px frame, score ≥ 0.2 | 22/72 (43 boxes elsewhere) |
+| Same with 2×2 overlapping tiles | 43/72 (144 boxes elsewhere, often the pink rollers) |
+| Full pipeline, `recall` | 36/72, precision 36/36 |
+| Full pipeline, `hybrid` | **36/72, precision 36/47** (11 false positives); 170 s vs about 50 s for 30 s with 2 workers |
+| Depth for RTMPose-only hands vs MediaPipe's own 3D (120 MediaPipe hands, 2D fed in) | median 17.4 mm per joint after rigid alignment; a jointed-finger fit was worse (17.7 mm) and 4× slower |
+
+**Rejected as a default.** The hands RTMDet adds are the ones MediaPipe still cannot read inside the box, and its extra boxes create false positives. RTMDet-nano is small and trained mostly on third-person images. The preset stays available, labelled experimental, only to try on other recording families; it is hidden unless `uv sync --extra hybrid` and `egohand fetch-model --rtm` have run.
+
+## Wrong-hand labels: what was measured (31 Oct 2026)
+
+Two separate failures make the viewer show the wrong hand label:
+
+1. **Ghost skeletons.** A track that misses a frame is drawn as "predicted" for up to 0.15 s. When the hand was re-detected under a new track (a rescue crop placed the wrist outside the wrist gate), the old track's ghost was drawn on top of the observed hand, often with the other side. **Fix (now in `recall`, `accurate`, `hybrid` via `--box-link`):** a just-missed track whose predicted box overlaps a hand observed this frame by more than 50% is reported `lost`, not `predicted`; an unmatched detection inside such a box keeps the old identity. Replayed on the same detections: ghost frames dev 1 → 0, holdout 10 → 6; recall, precision and identity fragments unchanged (observations are untouched).
+2. **Left/right errors.** With two hands observed in one frame, both got the same side in 11/102 dev and 69/165 holdout frames; only 4/69 were the same hand detected twice. Pairing rules (force one left + one right, by MediaPipe's P(right), by position, or both) helped on dev (27 → 29 of 33) but **not on holdout** (33 → 32 of 38; 38 → 38 of 45), so **none was adopted**. Most same-side frames are unlabelled, so the cause (wrong side vs another person's hand) is not measurable with the current labels.

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import uuid
 
 from django.conf import settings
@@ -28,7 +29,27 @@ PRESETS = {
     "recall": {"description": "Thresholds 0.3 + centre-crop rescue; about 2x detector time",
                "measured": "holdout recall 39/78, precision 39/40 (provisional labels, one clip); "
                            "more track fragmentation"},
+    "accurate": {"description": "recall + a reverse-time detection pass; about 2x detector time",
+                 "measured": "holdout recall 46/78, precision 46/48 (provisional labels, one clip); "
+                             "dev 41/72 with no false positives"},
+    "hybrid": {"description": "EXPERIMENTAL: recall + an RTMDet hand detector for hands MediaPipe misses; "
+                              "RTMPose 2D with fitted depth where MediaPipe still fails; about 3x slower",
+               "measured": "dev: no recall gain (36/72) and 11 false positives (precision 0.77), provisional "
+                           "labels, one clip; try it on other recording families only"},
 }
+
+
+def available_presets() -> dict:
+    """Presets this installation can run (hybrid needs onnxruntime and the RTM hand models)."""
+    names = dict(PRESETS)
+    try:
+        import onnxruntime  # noqa: F401
+        ready = all((settings.RTM_MODELS/n).exists() for n in ("rtmdet_nano_hand.onnx", "rtmpose_m_hand.onnx"))
+    except ImportError:
+        ready = False
+    if not ready:
+        names.pop("hybrid")
+    return names
 
 
 class ApiError(Exception):
@@ -104,7 +125,7 @@ def health(request):
 
 @api(("GET",))
 def presets(request):
-    return {"presets": PRESETS, "default": "recall",
+    return {"presets": available_presets(), "default": "recall",
             "note": "Measurements are provisional (labels not yet human-reviewed) and from one clip."}
 
 
@@ -122,6 +143,44 @@ def register_video(path: Path) -> Video:
         name=services.display_name(path), path=str(path), sha256=source_sha, width=int(info["width"]), height=int(info["height"]),
         fps=info["fps"], frame_count=frames, duration_s=float(info["timestamps"][-1] - info["timestamps"][0]),
         timestamp_source=info["timestamp_source"])
+
+
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
+
+
+def scan_media(paths=None) -> dict:
+    """Register every video under the allowed media folders (or the given files/folders).
+
+    Already registered files are skipped without re-hashing (processing verifies the hash before a
+    run is queued and again in the worker), so a rescan only costs time for NEW files. Unreadable
+    files are reported, never fatal.
+    """
+    targets = [Path(p) for p in paths] if paths else [r for r in settings.MEDIA_ROOTS if r.is_dir()]
+    files = []
+    for target in targets:
+        if target.is_dir():
+            files += sorted(p for p in target.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES)
+        else:
+            files.append(target)
+    report = {"registered": [], "already_registered": 0, "failed": []}
+    for path in files:
+        try:
+            resolved = services.allowed_media_path(path)
+            if Video.objects.filter(path=str(resolved)).exists():
+                report["already_registered"] += 1
+                continue
+            report["registered"].append(register_video(resolved).as_dict())
+        except subprocess.CalledProcessError:
+            report["failed"].append({"name": path.name, "error": "not a readable video (FFprobe could not open it)"})
+        except Exception as error:  # outside the allowed folders, changed or corrupt
+            report["failed"].append({"name": path.name, "error": str(error)[:300]})
+    return report
+
+
+@api(("POST",))
+def videos_scan(request):
+    """Find videos added to the media folders since the server started."""
+    return scan_media()
 
 
 @api(("GET", "POST"))
@@ -206,11 +265,12 @@ def runs(request):
     video_id = field("video_id", int)
     if video_id is None:
         raise ApiError("video_id is required")
+    preset = data.get("preset", "recall")
+    if preset not in available_presets():  # cheap checks first: no video hashing for a bad request
+        raise ApiError(f"preset must be one of {sorted(available_presets())}"
+                       + (" (hybrid needs: uv sync --extra hybrid; egohand fetch-model --rtm)" if preset == "hybrid" else ""))
     video = Video.objects.get(pk=video_id)
     services.assert_video_unchanged(video)
-    preset = data.get("preset", "recall")
-    if preset not in PRESETS:
-        raise ApiError(f"preset must be one of {sorted(PRESETS)}")
     start = field("start_s", float, 0.)
     duration = field("duration_s", float)
     timestamps = services.video_timestamps(video)
@@ -263,10 +323,11 @@ def run_detail(request, run_id):
         lift = lifts[0] if lifts else None
         data["artifacts"] = {
             "identity": identity.name if identity.is_file() else None,
+            "motion_events": "motion_events.json" if (directory/"motion_events.json").is_file() else None,
             "lift": {"summary": lift.name, "arrays": lift.with_suffix(".npz").name} if lift else None,
         }
     else:
-        data.update(proxy=None, artifacts={"identity": None, "lift": None})
+        data.update(proxy=None, artifacts={"identity": None, "lift": None, "motion_events": None})
     return data
 
 
@@ -346,7 +407,11 @@ def run_review_queue(request, run_id):
 def review_decision(request, run_id, item_id: str):
     run = Run.objects.get(pk=run_id)
     queue = services.cached_json(run_dir(run)/"quality"/"review_queue.json")
-    if item_id not in {q["item_id"] for q in queue}:
+    events_path = run_dir(run)/"motion_events.json"
+    motion_ids = {e["event_id"] for e in services.cached_json(events_path)["events"]} if events_path.exists() else set()
+    # Review-queue items and candidate motion events share the decision store (confirm = confirmed_issue,
+    # reject = false_alarm for a motion event).
+    if item_id not in {q["item_id"] for q in queue} | motion_ids:
         raise ApiError("unknown review item", 404)
     data = body(request)
     verdict, reviewer = data.get("verdict"), (data.get("reviewer") or "").strip()
@@ -357,6 +422,13 @@ def review_decision(request, run_id, item_id: str):
     decision = ReviewDecision.objects.create(run=run, item_id=item_id, verdict=verdict, reviewer=reviewer,
                                              note=str(data.get("note", ""))[:2000])
     return JsonResponse(decision.as_dict(), status=201)
+
+
+@api(("GET",))
+def run_decisions(request, run_id):
+    """All review decisions of a run (quality-queue items and candidate motion events), oldest first."""
+    run = Run.objects.get(pk=run_id)
+    return {"decisions": [{**d.as_dict(), "item_id": d.item_id} for d in run.decisions.all()]}
 
 
 @api(("GET",))
@@ -454,7 +526,7 @@ def run_artifact(request, run_id, name: str):
     """Download whitelisted run files (exports) for analysis."""
     allowed = {"landmarks.jsonl", "landmarks.csv", "landmarks.npz", "manifest.json", "metrics.json",
                "tracking_events.csv", "replay.rrd", "quality/review_queue.csv", "quality/quality_frames.csv",
-               "identity.json"}
+               "identity.json", "motion_events.json"}
     if re.fullmatch(r"lift_hfov\d{2,3}\.(npz|json)", name):
         allowed.add(name)
     if name not in allowed:
@@ -495,7 +567,8 @@ def run_compare(request, run_id):
 
 # --------------------------------------------------------------------------- viewer
 FRONTEND_FILES = {"": ("index.html", "text/html; charset=utf-8"),
-                  "backend-connector.js": ("backend-connector.js", "text/javascript; charset=utf-8")}
+                  "backend-connector.js": ("backend-connector.js", "text/javascript; charset=utf-8"),
+                  "hand-mesh.js": ("hand-mesh.js", "text/javascript; charset=utf-8")}
 
 
 def frontend(request, name: str = ""):

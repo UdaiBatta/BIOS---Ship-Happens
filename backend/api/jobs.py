@@ -59,6 +59,8 @@ def build_process_argv(run: Run, out_dir: Path) -> list[str]:
         argv.append("--no-video")
     if run.write_rrd:
         argv.append("--rrd")
+    if run.preset == "hybrid":
+        argv += ["--rtm-models", str(settings.RTM_MODELS)]
     if settings.GOVERNANCE_FILE:
         argv += ["--governance", settings.GOVERNANCE_FILE]
     return argv
@@ -96,6 +98,8 @@ def execute(run: Run, process=None) -> None:
     # (its summary carries "ASSUMED (not calibrated)", which the viewer displays).
     from egohand_twin.identity import write_identity
     write_identity(out_dir)
+    from egohand_twin.motion_events import write_events
+    write_events(out_dir)            # inferred candidate events (entry/exit/gap/hold/movement)
     if settings.LIFT_HFOV:
         from egohand_twin.lift import lift_run
         lift_run(out_dir, settings.LIFT_HFOV)

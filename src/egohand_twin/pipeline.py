@@ -18,6 +18,7 @@ from .governance import load as load_governance
 from .quality import frame_stats
 from .model import COORDINATES, MODEL_URL, CropRescueDetector, Detector, MultiViewDetector, sha256
 from .render import RerunSink, VideoSink, composite
+from .smoothing import smooth_samples
 from .tracking import IdentityTracker, baseline_records
 
 
@@ -95,6 +96,22 @@ def probe(path: Path, timestamp_source: str = "auto", check_frames: int = 48):
             "timestamp_source": source, "timestamp_note": note}
 
 
+def _write_csv_rows(writer, sample: dict, hand: dict) -> None:
+    base = {k: sample[k] for k in ["frame_index", "timestamp_s"]}
+    base.update({k: hand[k] for k in ["track_id", "state", "observed", "side", "handedness_score"]})
+    base["missing_reason"] = hand.get("missing_reason")
+    for j in (range(21) if hand["image_xyz"] is not None else [-1]):
+        row = {**base, "landmark_index": j}
+        for key, columns in [
+                ("image_xyz", ["x_norm", "y_norm", "z_norm"]),
+                ("world_xyz_m", ["world_x_m", "world_y_m", "world_z_m"]),
+                ("image_xyz_raw", ["raw_x_norm", "raw_y_norm", "raw_z_norm"]),
+                ("world_xyz_m_raw", ["raw_world_x_m", "raw_world_y_m", "raw_world_z_m"])]:
+            if j >= 0 and hand[key] is not None:
+                row.update(zip(columns, hand[key][j]))
+        writer.writerow(row)
+
+
 def build_detector(args):
     """Construct the detector exactly as configured by process options (shared with parallel.py)."""
     options = dict(detection=args.detection_threshold, presence=args.presence_threshold,
@@ -103,11 +120,18 @@ def build_detector(args):
     if args.rescue_crop and rescue:
         raise ValueError("Use either --rescue-crop (historical) or --rescue, not both")
     if args.rescue_crop:
-        return CropRescueDetector(Path(args.model), **options)
-    if rescue:
-        return MultiViewDetector(Path(args.model), strategies=rescue, max_crops=args.max_crops,
-                                 dedupe=args.dedupe, crop_max_side=getattr(args, "crop_max_side", None), **options)
-    return Detector(Path(args.model), **options)
+        detector = CropRescueDetector(Path(args.model), **options)
+    elif rescue:
+        detector = MultiViewDetector(Path(args.model), strategies=rescue, max_crops=args.max_crops,
+                                     dedupe=args.dedupe, crop_max_side=getattr(args, "crop_max_side", None), **options)
+    else:
+        detector = Detector(Path(args.model), **options)
+    if getattr(args, "hand_detector", None):
+        from .hybrid import HybridDetector
+        detector = HybridDetector(detector, Path(args.model), Path(args.rtm_models), args.detection_threshold,
+                                  args.presence_threshold, num_hands=args.num_hands,
+                                  discover_every=getattr(args, "discover_every", None) or 0)
+    return detector
 
 
 def process(args, progress=None, detector_override=None, started=None, extra_metrics=None):
@@ -142,7 +166,14 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
     detector = video_sink = rerun_sink = None
     tracker = IdentityTracker(args.predict_seconds, args.retain_seconds, not args.no_smoothing,
                               (int(info["width"]), int(info["height"]))
-                              if getattr(args, "tracker_units", "normalized") == "diagonal" else None)
+                              if getattr(args, "tracker_units", "normalized") == "diagonal" else None,
+                              box_link=bool(getattr(args, "box_link", False)),
+                              side_weights=({"center_crop_rescue": args.crop_side_weight}
+                                            if getattr(args, "crop_side_weight", None) is not None else None),
+                              side_hysteresis=getattr(args, "side_hysteresis", None) or 0.,
+                              max_records=8,  # frame schema: at most 8 hand records
+                              last_position_link=bool(getattr(args, "last_position_link", False)),
+                              pair_margin=getattr(args, "pair_margin", None))
     rss = psutil.Process()
     peak_rss = rss.memory_info().rss
     latency, sample_rows, events = [], [], []
@@ -180,6 +211,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             expected = int(np.count_nonzero(in_range)) // max(1, args.stride)
             if args.max_frames is not None:
                 expected = min(expected, args.max_frames)
+            smoothed_hands = 0
+            buffered = []   # frame records, written after offline smoothing (raw values never change)
             while True:
                 # Frames are always decoded sequentially so frame index <-> PTS stays
                 # exact; frames before the interval or skipped by stride are grabbed
@@ -244,7 +277,7 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                                       "mean_luma": stats["mean_luma"],
                                       "masks": {"hand_observed": any(h["observed"] for h in hands)}},
                           "hands": hands}
-                jf.write(json.dumps(sample, separators=(",", ":"), allow_nan=False)+"\n")
+                buffered.append(sample)
                 observed_frames += int(bool(detections))
                 for hand in hands:
                     counts[hand["state"]] += 1
@@ -255,19 +288,6 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                                        "from_state": previous, "to_state": hand["state"],
                                        "missing_reason": hand.get("missing_reason")})
                     previous_states[hand["track_id"]] = hand["state"]
-                    base = {k: sample[k] for k in ["frame_index", "timestamp_s"]}
-                    base.update({k: hand[k] for k in ["track_id", "state", "observed", "side", "handedness_score"]})
-                    base["missing_reason"] = hand.get("missing_reason")
-                    for j in (range(21) if hand["image_xyz"] is not None else [-1]):
-                        row = {**base, "landmark_index": j}
-                        for key, columns in [
-                            ("image_xyz", ["x_norm", "y_norm", "z_norm"]),
-                            ("world_xyz_m", ["world_x_m", "world_y_m", "world_z_m"]),
-                            ("image_xyz_raw", ["raw_x_norm", "raw_y_norm", "raw_z_norm"]),
-                            ("world_xyz_m_raw", ["raw_world_x_m", "raw_world_y_m", "raw_world_z_m"])]:
-                            if j >= 0 and hand[key] is not None:
-                                row.update(zip(columns, hand[key][j]))
-                        writer.writerow(row)
                     sample_rows.append((frame_index, timestamp, hand))
                 stages["export_rows"] += time.perf_counter() - mark
                 mark = time.perf_counter()
@@ -290,6 +310,16 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
                 peak_rss = max(peak_rss, rss.memory_info().rss)
                 if processed % 100 == 0:
                     print(f"Processed {processed} frames; source time {timestamp:.2f}s", flush=True)
+            if not args.no_smoothing and args.identity == "persistent":
+                mark = time.perf_counter()
+                smoothed_hands = smooth_samples(buffered, int(info["width"]), int(info["height"]))
+                stages["track"] += time.perf_counter() - mark
+            mark = time.perf_counter()
+            for sample in buffered:
+                jf.write(json.dumps(sample, separators=(",", ":"), allow_nan=False)+"\n")
+                for hand in sample["hands"]:
+                    _write_csv_rows(writer, sample, hand)
+            stages["export_rows"] += time.perf_counter() - mark
         if processed == 0:
             raise ValueError("No frames processed; check input and selected time range")
         finalize_start = time.perf_counter()
@@ -327,6 +357,10 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             "track_state_samples": counts,
             "track_ids_created": tracker.next_id-1 if args.identity == "persistent" else None,
             "reacquisitions": tracker.reacquisitions if args.identity == "persistent" else None,
+            "box_links": tracker.box_links if args.identity == "persistent" else None,
+            "ghosts_suppressed": tracker.ghosts_suppressed if args.identity == "persistent" else None,
+            "tracks_retired_for_capacity": tracker.capacity_retired if args.identity == "persistent" else None,
+            "last_position_links": tracker.last_position_links if args.identity == "persistent" else None,
             "first_timestamp_s": first_s, "last_timestamp_s": last_s,
             "processing_seconds": elapsed, "end_to_end_fps": processed/elapsed,
             **(extra_metrics or {}),
@@ -338,6 +372,8 @@ def process(args, progress=None, detector_override=None, started=None, extra_met
             "stage_seconds_unattributed": round(elapsed - sum(stages.values()), 4),
             "timestamp_source": info["timestamp_source"],
             "detector_stats": getattr(detector, "stats", None),
+            "smoothing": ({"method": "offline: wrist constant-velocity Kalman + RTS; fingers One Euro relative to the wrist",
+                           "hands_smoothed": smoothed_hands} if not args.no_smoothing else None),
             "accuracy": None, "identity_switches": None,
             "notes": ["Coverage is not recall or accuracy; labels are required.",
                       "Reacquisitions are tracker decisions, not verified identity recovery.",

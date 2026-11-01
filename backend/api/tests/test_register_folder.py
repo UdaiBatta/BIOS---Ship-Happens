@@ -48,7 +48,7 @@ class RegisterFolderTests(TestCase):
             out, _ = self.register(self.media)
         # Only the never-registered broken file is tried again.
         self.assertEqual([call.args[0].name for call in rehash.call_args_list], ["broken.mp4"])
-        self.assertEqual(out.count("already registered"), 2)
+        self.assertIn("\"already_registered\": 2", out)
         self.assertEqual(Video.objects.count(), 2)
 
     def test_files_outside_the_allowed_folders_are_refused(self):
@@ -60,3 +60,15 @@ class RegisterFolderTests(TestCase):
         response = self.client.post("/api/runs", "{}", content_type="application/json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("video_id is required", response.json()["error"])
+
+    def test_hybrid_preset_is_hidden_and_refused_without_its_models(self):
+        with override_settings(RTM_MODELS=Path(tempfile.gettempdir())/"no-rtm-models-here"):
+            presets = self.client.get("/api/presets").json()["presets"]
+            self.assertNotIn("hybrid", presets)
+            self.assertIn("accurate", presets)
+            video = Video.objects.create(name="v", path="/x/v.mp4", sha256="0"*64, width=10, height=10,
+                                         fps=30, frame_count=3, duration_s=.1, timestamp_source="t")
+            response = self.client.post("/api/runs", '{"video_id": %d, "preset": "hybrid"}' % video.id,
+                                        content_type="application/json")
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("fetch-model --rtm", response.json()["error"])

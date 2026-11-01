@@ -1437,7 +1437,13 @@ function renderEvents() {
 function highlightEvents() {
   let current = null;
   for (const b of $('events').querySelectorAll('.ev')) { const s = +b.dataset.start, e = +b.dataset.end; const on = S.t >= s && S.t < e; b.classList.toggle('current', on); if (on) current = b; }
-  if (current && S.playing) current.scrollIntoView({ block: 'nearest' });
+  // Scroll the events list itself, never the page: scrollIntoView also scrolls the window whenever the events panel is
+  // partly off-screen, which made the whole page jump up and down during playback.
+  if (current && S.playing) {
+    const list = $('events'), top = current.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop, bottom = top + current.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+  }
 }
 function renderHeader() {
   const f = S.frames[S.idx];

@@ -594,5 +594,5 @@ def frontend(request, name: str = ""):
     if not path.exists():
         return JsonResponse({"error": f"{filename} not found in MOTIONIQ_FRONTEND_DIR"}, status=404)
     response = HttpResponse(path.read_bytes(), content_type=content_type)
-    response["Cache-Control"] = "no-cache"
+    response["Cache-Control"] = "no-store"   # a git pull must always reach the browser on the next reload
     return response

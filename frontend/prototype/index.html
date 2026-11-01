@@ -170,9 +170,12 @@
   .tooltip .row .lab { color: var(--ink-2); }
 
   table.inspect { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; table-layout: fixed; }
-  table.inspect td, table.inspect th { overflow-wrap: break-word; }
+  /* One line per cell, fixed row height: the panel keeps the same size on every frame. Full text in the tooltip. */
+  table.inspect td, table.inspect th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 22px; box-sizing: border-box; }
   table.inspect td.k, table.inspect th:first-child { width: 42%; }
-  table.inspect.hands td.k, table.inspect.hands th:first-child { width: 30%; }
+  table.inspect.hands td.k, table.inspect.hands th:first-child { width: 34%; }
+  table.inspect.hands { margin-top: 4px; }
+  .inspect-status { margin: 8px 0 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 18px; }
   table.inspect th, table.inspect td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--grid); vertical-align: top; }
   table.inspect th { color: var(--muted); font-weight: 500; }
   table.inspect td.k { color: var(--ink-2); }
@@ -310,7 +313,7 @@
   </section>
 
   <section class="panel" id="p-inspect" aria-label="Frame details">
-    <h2>Frame details <span class="sub">table view of the current frame</span></h2>
+    <h2>Frame details <span class="sub">table view of the current frame · viewer build 2026-11-01.4</span></h2>
     <div id="inspector"></div>
   </section>
 
@@ -1380,27 +1383,41 @@ function renderInspector() {
   renderInspectorBody(box);
   box.scrollTop = keep;
 }
+// Frame details has a FIXED structure so it never changes size while playing: the same rows every frame, one
+// column per side (fixed per run: left, right, plus other / unknown when the run has them), one status line, and
+// every value on one line (cut with an ellipsis; the full text is in the tooltip).
+function inspectorCell(tag, text, cls) {
+  const c = el(tag, cls ? { class: cls, title: text } : { title: text }, text); return c;
+}
 function renderInspectorBody(box) {
-  const f = S.frames[S.idx]; box.replaceChildren(); if (!f) return;
-  if (!inData(S.t)) { box.append(el('p', { class: 'note' }, 'No run data at this time (outside the loaded run’s time range).')); return; }
-  const q = f.quality || {}, m = q.masks || {};
+  box.replaceChildren();
+  const f = S.frames[S.idx], inRange = !!f && inData(S.t);
+  const q = (inRange && f.quality) || {}, m = q.masks || {};
   const t1 = el('table', { class: 'inspect' }), tb1 = el('tbody');
-  const kv = (k, v, cls) => { const tr = el('tr'); tr.append(el('td', { class: 'k' }, k)); const td = el('td', cls ? { class: cls } : {}, v); tr.append(td); tb1.append(tr); };
-  kv('Frame · time', `${f.frame_index} · ${fmtT(f.timestamp_s)}`);
+  const kv = (k, v, cls) => { const tr = el('tr'); tr.append(inspectorCell('td', k, 'k'), inspectorCell('td', v, cls)); tb1.append(tr); };
+  kv('Frame · time', inRange ? `${f.frame_index} · ${fmtT(f.timestamp_s)}` : '—');
   if (S.avail.blur) kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : num(q.blur_laplacian_var, q.blur_laplacian_var < 10 ? 1 : 0));
   for (const [k, lab] of [['hand_observed', 'Hand observed'], ['low_blur', 'Low blur'], ['cam_space_valid', 'Camera lift accepted']])
     if (k === 'hand_observed' || S.lanes.some((L) => L.key === k)) kv(lab, m[k] === true ? '✓ yes' : m[k] === false ? '✕ no' : 'n/a', m[k] === true ? 'ok' : m[k] === false ? 'bad' : 'na');
   t1.append(tb1); box.append(t1);
-  // Lost tracks are kept by the tracker for re-identification but are not hands on screen: listing them as
-  // columns read as "several left hands at once". They get a one-line note instead (see below the table).
-  const hands = (f.hands || []).filter((h) => h.state !== 'retired' && h.state !== 'lost');
-  const lostNote = (f.hands || []).filter((h) => h.state === 'lost')
-    .map((h) => `#${h.track_id} ${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} (${num(h.seconds_since_observed, 1)} s)`).join(', ');
-  const t2 = el('table', { class: 'inspect hands' }); t2.style.marginTop = '10px';
-  const head = el('tr'); head.append(el('th', {}, 'Field')); for (const h of hands) { const th = el('th'); const d = el('span', { class: 'dot' }); d.style.background = COLOR[h.anatomical_side] || COLOR.other; th.append(d, document.createTextNode(`${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} #${h.track_id}`)); head.append(th); }
+  // One status line, always present (lost tracks are kept by the tracker for re-identification, not shown as columns).
+  const lost = inRange ? (f.hands || []).filter((h) => h.state === 'lost')
+    .map((h) => `#${h.track_id} ${SIDE_LABEL[h.anatomical_side] || h.anatomical_side} (${num(h.seconds_since_observed, 1)} s)`).join(', ') : '';
+  const statusText = !f ? 'No run loaded' : !inRange ? 'Outside the loaded run’s time range' : lost ? `Lost tracks (kept for re-identification): ${lost}` : 'Lost tracks: none';
+  box.append(el('p', { class: 'note inspect-status', title: statusText }, statusText));
+  // Columns are fixed for the whole run.
+  const sides = ['wearer_left', 'wearer_right', ...['other', 'unknown'].filter((k) => S.lanes.some((L) => L.key === k))];
+  const visible = inRange ? (f.hands || []).filter((h) => h.state !== 'retired' && h.state !== 'lost') : [];
+  const pick = (side) => { let best = null; for (const h of visible) if (h.anatomical_side === side && (!best || (HAS_3D.has(h.state) && !HAS_3D.has(best.state)))) best = h; return best; };
+  const cols = sides.map((side) => ({ side, h: pick(side), extra: visible.filter((h) => h.anatomical_side === side).length - 1 }));
+  const t2 = el('table', { class: 'inspect hands' });
+  const head = el('tr'); head.append(inspectorCell('th', 'Field'));
+  for (const c of cols) {
+    const label = `${SIDE_LABEL[c.side] || c.side}${c.h ? ` #${c.h.track_id}` : ''}${c.extra > 0 ? ` +${c.extra}` : ''}`;
+    const th = inspectorCell('th', ''); th.title = label; const d = el('span', { class: 'dot' }); d.style.background = COLOR[c.side] || COLOR.other;
+    th.append(d, document.createTextNode(label)); head.append(th);
+  }
   const tb = el('tbody'); t2.append(el('thead'), tb); t2.tHead.append(head);
-  const lostP = lostNote ? el('p', { class: 'note' }, `Lost tracks (not visible, kept for re-identification): ${lostNote}`) : null;
-  if (!hands.length) { box.append(el('p', { class: 'note' }, 'No hands in this frame.')); if (lostP) box.append(lostP); return; }
   const rows = [
     ['State', null, (h) => h.state], ['Detected by', null, (h) => h.detection_origin ? h.detection_origin.replace(/_/g, ' ') : '—'],
     ['Wrist depth', 'wristDepth', (h) => wristDepth(h) == null ? '—' : num(wristDepth(h), 3) + ' m'],
@@ -1411,13 +1428,22 @@ function renderInspectorBody(box) {
     ['Side score', 'pRight', (h) => sideSupport(h) == null ? 'unknown' : `${Math.round(100 * sideSupport(h))}% ${h.anatomical_side === 'wearer_left' ? 'left' : 'right'}`],
     ['Side from', null, (h) => h._side_source || (S.synthetic ? 'synthetic' : 'file')],
     ['Landmark confidence', null, (h) => h.confidence == null ? 'not calibrated' : num(h.confidence, 2)],
-    ['3D source', 'camSource', (h) => validJointSet(S.smooth ? h.cam_xyz_m : (h.cam_xyz_m_raw || h.cam_xyz_m)) ? (h.provenance && h.provenance.cam_xyz_m ? h.provenance.cam_xyz_m : 'camera-space') : validJointSet(S.smooth ? h.world_xyz_m : (h.world_xyz_m_raw || h.world_xyz_m)) ? 'hand-relative posture; camera position unavailable' : '—'],
+    ['3D source', 'camSource', (h) => validJointSet(S.smooth ? h.cam_xyz_m : (h.cam_xyz_m_raw || h.cam_xyz_m)) ? (h.provenance && h.provenance.cam_xyz_m ? h.provenance.cam_xyz_m : 'camera-space') : validJointSet(S.smooth ? h.world_xyz_m : (h.world_xyz_m_raw || h.world_xyz_m)) ? 'hand-relative only (no camera position)' : '—'],
     ['Mesh', 'mesh', (h) => { const m = displayMeshFor(f, h); return m ? `✓ ${m.backend}${S.mode !== 'ours' || frameUsesHandRelativeFallback(f) ? ' · hand-relative' : ''}` : HAS_3D.has(h.state) && h.anatomical_side !== 'other' ? 'none (skeleton)' : '—'; }],
     ['Mesh–PnP depth gap', 'meshGap', (h) => { const m = meshFor(f, h); return m && m.gap_m != null ? num(m.gap_m * 100, 1) + ' cm' : '—'; }],
   ];
-  for (const [lab, need, fn] of rows) { if (need && !S.avail[need]) continue; const tr = el('tr'); tr.append(el('td', { class: 'k' }, lab)); for (const h of hands) tr.append(el('td', {}, fn(h))); tb.append(tr); }
+  for (const [lab, need, fn] of rows) {
+    if (need && !S.avail[need]) continue;
+    const tr = el('tr'); tr.append(inspectorCell('td', lab, 'k'));
+    for (const c of cols) {
+      let text = '—';
+      if (c.h) { try { text = String(fn(c.h) ?? '—'); } catch { text = '—'; } }
+      else if (lab === 'State') text = 'not in view';
+      tr.append(inspectorCell('td', text, c.h ? undefined : 'na'));
+    }
+    tb.append(tr);
+  }
   box.append(t2);
-  if (lostP) box.append(lostP);
   box.append(el('p', { class: 'prov' }, 'Side score is classifier support for left/right, not landmark accuracy. Provenance: measured = timestamps and image stats; predicted = model output; inferred = geometry and rules (camera-space 3D, grip aperture, side).'));
 }
 const SEV = { good: { sym: '●', col: COLOR.good, text: 'recovered' }, info: { sym: '○', col: COLOR.muted, text: 'info' }, warn: { sym: '▲', col: COLOR.warning, text: 'problem' } };

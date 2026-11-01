@@ -253,6 +253,12 @@
       <label><input type="checkbox" id="chkTrails" checked> wrist trails (2 s)</label>
       <label title="Draw mesh edges only"><input type="checkbox" id="chkWire"> wireframe</label>
       <label title="Mesh opacity">opacity <input type="range" id="rngOpacity" min="0.2" max="1" step="0.05" value="1" style="width: 80px; vertical-align: middle"></label>
+      <div class="seg" id="segView3" role="group" aria-label="3D viewpoint">
+        <button data-v="side" aria-pressed="true" title="Angled side view: distance from the camera runs left to right">Side</button>
+        <button data-v="top" aria-pressed="false" title="Looking down: distance from the camera runs up the screen">Top</button>
+        <button data-v="camera" aria-pressed="false" title="Roughly the head camera's own viewpoint (same as the video)">Camera</button>
+      </div>
+      <label title="Keep the hands centred and sized to fill the view"><input type="checkbox" id="chkFollow" checked> follow hands</label>
       <button class="btn" id="btnCamReset" title="Reset the 3D camera (also: double-click the 3D view)">Reset view</button>
     </div>
     <div class="legend note" id="meshNote" hidden></div>
@@ -343,7 +349,7 @@ const S = {
   playing: false, speed: 1, lastTick: 0,
   mode: 'ours', smooth: true, synthetic: true, clipId: 'synthetic_demo',
   lanes: null, series: null, events: [], eventFilter: 'all', breakdown: null,
-  orbit: { yaw: -0.12, pitch: 0.62, dist: 0.9 }, video: null, dirty: true,
+  orbit: { yaw: -0.95, pitch: 0.32, zoom: 1 }, view3: 'side', follow: true, cam3: null, video: null, dirty: true,
   camera: { ...DEFAULT_CAMERA }, lift: null, liftSummaries: new Map(), sideSource: null,
   landmarksSha256: null,
   mesh: null, display: 'both', meshCoverage: null,
@@ -797,19 +803,51 @@ function drawTag(g, placed, x, y, w, h, text, col) {
 }
 
 /* ================================================================== PANEL 2: 3D */
-const TARGET = [0, 0.1, 0.33];
-function proj3(p, w, h) {
-  const o = S.orbit;
-  const x = p[0] - TARGET[0], y = p[1] - TARGET[1], z = p[2] - TARGET[2];
-  const cy = Math.cos(o.yaw), sy = Math.sin(o.yaw), x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
-  const cp = Math.cos(o.pitch), sp = Math.sin(o.pitch), y1 = cp * y - sp * z1, z2 = sp * y + cp * z1;
-  const d = Math.max(0.05, o.dist + z2), f = Math.min(w, h) * 1.05;
-  return [w / 2 + (f * x1) / d, h / 2 + (f * y1) / d, d];
+const TARGET = [0, 0.1, 0.33], NEAR3 = 0.04;
+const VIEWS3 = { side: { yaw: -0.95, pitch: 0.32 }, top: { yaw: -0.05, pitch: 1.2 }, camera: { yaw: 0, pitch: 0 } };
+// The 3D camera orbits a target. With "follow hands" the target is the hands' mean position over +-0.4 s and the
+// distance is chosen so they fill the view; otherwise the whole 0.2-0.9 m working volume is shown.
+// "Camera" puts the eye at the head camera itself, looking straight ahead (same viewpoint as the video).
+function hand3(h) {
+  if (!HAS_3D.has(h.state)) return null;
+  if (S.mode === 'ours') return S.smooth ? h.cam_xyz_m : (h.cam_xyz_m_raw || h.cam_xyz_m);
+  return null;
 }
+function updateCam3() {
+  const o = S.orbit, pts = [];
+  if (S.follow && S.mode === 'ours' && S.frames.length) {
+    for (let i = S.idx; i >= 0 && S.times[i] >= S.t - 0.4; i--) for (const h of S.frames[i].hands || []) { const p = hand3(h); if (p) pts.push(...p); }
+    for (let i = S.idx + 1; i < S.frames.length && S.times[i] <= S.t + 0.4; i++) for (const h of S.frames[i].hands || []) { const p = hand3(h); if (p) pts.push(...p); }
+  }
+  let target = TARGET, dist = 0.9;
+  if (pts.length) {
+    target = [0, 1, 2].map((k) => pts.reduce((a, p) => a + p[k], 0) / pts.length);
+    const now = (S.frames[S.idx].hands || []).map(hand3).filter(Boolean).flat();   // size from this frame, centre from +-0.4 s
+    const r = (now.length ? now : pts).map((p) => Math.hypot(p[0] - target[0], p[1] - target[1], p[2] - target[2])).sort((a, b) => a - b);
+    const radius = Math.max(0.09, r[Math.floor(r.length * 0.95)]);
+    dist = clamp(1.05 * (2 * radius + 0.04) / 0.85, 0.25, 1.6);
+  } else if (S.cam3 && S.cam3.follow) { target = S.cam3.target; dist = S.cam3.base; }   // hands gone: hold the last framing
+  let yaw0 = 0, pitch0 = 0;
+  if (S.view3 === 'camera') {   // eye at the head camera, looking at the hands (or straight ahead without hands)
+    const c = pts.length || (S.cam3 && S.cam3.follow) ? target : [0, 0, 0.5], len = Math.hypot(...c) || 1;
+    yaw0 = Math.atan2(-c[0], c[2]); pitch0 = Math.asin(clamp(c[1] / len, -1, 1));
+    target = c; dist = len;
+  }
+  S.cam3 = { target, base: dist, dist: dist * (S.view3 === 'camera' ? 1 : (o.zoom || 1)), follow: pts.length > 0, yaw0, pitch0 };
+}
+function view3(p) {   // camera coordinates -> [x, y, depth] in the viewer's frame
+  const o = S.orbit, c = S.cam3 || { target: TARGET, dist: 0.9 }, yaw = o.yaw + (c.yaw0 || 0), pitch = o.pitch + (c.pitch0 || 0);
+  const x = p[0] - c.target[0], y = p[1] - c.target[1], z = p[2] - c.target[2];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  return [x1, cp * y - sp * z1, c.dist + sp * y + cp * z1];
+}
+function screen3(v, w, h) { const f = Math.min(w, h) * (S.view3 === 'camera' ? 0.6 : 1.05), d = Math.max(NEAR3, v[2]); return [w / 2 + (f * v[0]) / d, h / 2 + (f * v[1]) / d, d]; }
+function proj3(p, w, h) { return screen3(view3(p), w, h); }
 function wristTrail(side, smooth) {
-  const out = []; const t0 = S.t - TRAIL_S;
+  const out = []; const t0 = S.t - TRAIL_S, now = handFor(S.frames[S.idx], side), track = now ? now.track_id : null;
   for (let i = S.idx; i >= 0 && S.times[i] >= t0; i--) {
-    const h = handFor(S.frames[i], side);
+    const h = (S.frames[i].hands || []).find((x) => x.track_id === track);   // one track only: no jumps between hands
     const pts = h && HAS_3D.has(h.state) ? (smooth ? h.cam_xyz_m : (h.cam_xyz_m_raw || h.cam_xyz_m)) : null;
     out.push(pts ? { p: pts[0], age: S.t - S.times[i] } : null);
   }
@@ -818,9 +856,16 @@ function wristTrail(side, smooth) {
 function drawThree() {
   const { g, w, h } = fit($('cvThree'));
   g.clearRect(0, 0, w, h); g.fillStyle = '#121211'; g.fillRect(0, 0, w, h);
+  updateCam3();
   const P = (p) => proj3(p, w, h);
   const seg = (a, b, col, lw = 1, alpha = 1, dash) => {
-    const A = P(a), B = P(b); g.save(); g.globalAlpha = alpha; g.strokeStyle = col; g.lineWidth = lw; if (dash) g.setLineDash(dash);
+    let va = view3(a), vb = view3(b);
+    if (va[2] < NEAR3 && vb[2] < NEAR3) return;   // behind the viewer
+    if (va[2] < NEAR3 || vb[2] < NEAR3) {          // clip at the near plane instead of exploding across the screen
+      const k = (NEAR3 - va[2]) / (vb[2] - va[2]), cut = va.map((q, i) => q + k * (vb[i] - va[i]));
+      if (va[2] < NEAR3) va = cut; else vb = cut;
+    }
+    const A = screen3(va, w, h), B = screen3(vb, w, h); g.save(); g.globalAlpha = alpha; g.strokeStyle = col; g.lineWidth = lw; if (dash) g.setLineDash(dash);
     g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke(); g.restore();
   };
   const ours = S.mode === 'ours';
@@ -834,15 +879,15 @@ function drawThree() {
     for (const z of PLAUSIBLE_DEPTH) { seg([-0.6, GY, z], [0.6, GY, z], COLOR.axis, 1.5); const L = P([0.6, GY, z]); g.fillStyle = COLOR.muted; g.font = '11px ' + C('--font'); g.fillText(`${z} m`, L[0] + 4, L[1] + 4); }
     // Camera frustum from the current (assumed) lens model, drawn to 0.12 m; half-angles clipped at 75° so wide lenses stay drawable
     if (S.camera && S.camera.vfov) {   // drawn only when the lens is known (synthetic demo or lift_*.json)
-      const half = (deg) => Math.tan(Math.min(deg / 2, 75) * Math.PI / 180);
-      const zf = 0.12, xf = half(S.camera.hfov) * zf, yf = half(S.camera.vfov) * zf;
+      const half = (deg) => Math.tan(Math.min(deg / 2, 60) * Math.PI / 180);   // wide lenses drawn clipped at 120°: a pointer, not to scale
+      const zf = 0.06, xf = half(S.camera.hfov) * zf, yf = half(S.camera.vfov) * zf;
       const corners = [[-xf, -yf, zf], [xf, -yf, zf], [xf, yf, zf], [-xf, yf, zf]];
-      for (const c of corners) seg([0, 0, 0], c, COLOR.muted, 1, 0.8);
-      for (let i = 0; i < 4; i++) seg(corners[i], corners[(i + 1) % 4], COLOR.muted, 1, 0.8);
+      for (const c of corners) seg([0, 0, 0], c, COLOR.muted, 1, 0.45);
+      for (let i = 0; i < 4; i++) seg(corners[i], corners[(i + 1) % 4], COLOR.muted, 1, 0.45);
     }
-    const O = P([0, 0, 0]); g.beginPath(); g.moveTo(O[0], O[1] - 7); g.lineTo(O[0] - 7, O[1] + 6); g.lineTo(O[0] + 7, O[1] + 6); g.closePath(); g.fillStyle = COLOR.ink2; g.fill();
+    const O = P([0, 0, 0]); if (view3([0, 0, 0])[2] > NEAR3) { g.beginPath(); g.moveTo(O[0], O[1] - 7); g.lineTo(O[0] - 7, O[1] + 6); g.lineTo(O[0] + 7, O[1] + 6); g.closePath(); g.fillStyle = COLOR.ink2; g.fill();
     g.fillStyle = COLOR.ink2; g.font = '11px ' + C('--font'); g.fillText('head camera', O[0] + 10, O[1] + 4);
-    placed.push({ x: O[0] + 6, y: O[1] - 8, w: g.measureText('head camera').width + 8, h: 16 });
+    placed.push({ x: O[0] + 6, y: O[1] - 8, w: g.measureText('head camera').width + 8, h: 16 }); }
   }
   const f = S.frames[S.idx];
   if (!f || !inData(S.t)) { $('threeHint').textContent = S.frames.length ? 'Outside the loaded run’s time range: no hand data' : ''; return; }
@@ -862,11 +907,23 @@ function drawThree() {
         : `${SIDE_LABEL[side] || side}: ${hnd.state} → no 3D${hnd.state === 'predicted' ? ' (2D only)' : ''}`);
       continue;
     }
+    if (ours) {   // depth cues: shadow on the bench plane, a drop line to it and the line of sight from the head camera
+      g.save(); g.strokeStyle = col; g.globalAlpha = 0.28; g.lineWidth = 5; g.lineCap = 'round'; g.lineJoin = 'round'; g.beginPath();
+      for (const [a, b] of BONES) {
+        const A = P([pts[a][0], GY, pts[a][2]]), B = P([pts[b][0], GY, pts[b][2]]);
+        if (A[2] > NEAR3 && B[2] > NEAR3) { g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); }
+      }
+      g.stroke(); g.restore();
+      seg(pts[0], [pts[0][0], GY, pts[0][2]], col, 1.2, 0.7, [3, 3]);
+      seg([0, 0, 0], pts[0], col, 1, 0.35, [2, 4]);
+      const F0 = P([pts[0][0], GY, pts[0][2]]);
+      if (F0[2] > NEAR3) { g.save(); g.globalAlpha = 0.8; g.strokeStyle = col; g.lineWidth = 1.5; g.beginPath(); g.ellipse(F0[0], F0[1], 6, 3, 0, 0, Math.PI * 2); g.stroke(); g.restore(); }
+    }
     const mesh = ours && S.display !== 'skeleton' ? meshFor(f, hnd) : null;
     if (mesh) pushMesh(drawList, mesh, S.mesh.faces, col, P, eye);
     if (!mesh) {   // skeleton (also the fallback when a hand has no mesh)
-      for (const [a, b] of BONES) { const A = P(pts[a]), B = P(pts[b]); drawList.push({ d: (A[2] + B[2]) / 2, kind: 'bone', A, B, col }); }
-      for (let j = 0; j < 21; j++) { const A = P(pts[j]); drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
+      for (const [a, b] of BONES) { const A = P(pts[a]), B = P(pts[b]); if (A[2] > NEAR3 && B[2] > NEAR3) drawList.push({ d: (A[2] + B[2]) / 2, kind: 'bone', A, B, col }); }
+      for (let j = 0; j < 21; j++) { const A = P(pts[j]); if (A[2] > NEAR3) drawList.push({ d: A[2] - 0.001, kind: 'joint', A, col, r: j === 0 ? 4 : 2.5 }); }
     } else if (S.display === 'both') overlay.push(pts.map(P));
     const meshTag = ours && S.mesh && S.display !== 'skeleton' && side !== 'other' ? (mesh ? ` · ${S.mesh.backend} mesh` : ' · no mesh (skeleton)') : '';
     // Not a measured distance: assumed lens + MediaPipe's learned hand size. Shown as an estimate.
@@ -879,6 +936,7 @@ function drawThree() {
       for (let k = 0; k + 1 < tr.length; k++) {
         if (!tr[k] || !tr[k + 1]) continue;
         const A = P(tr[k].p), B = P(tr[k + 1].p), a = 1 - tr[k].age / TRAIL_S;
+        if (A[2] <= NEAR3 || B[2] <= NEAR3) continue;
         g.save(); g.globalAlpha = clamp(a, 0, 1) * 0.85; g.strokeStyle = COLOR[side]; g.lineWidth = 2; g.lineCap = 'round';
         g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke(); g.restore();
       }
@@ -919,9 +977,11 @@ function drawThree() {
 }
 // Viewer position in camera coordinates (inverse of proj3's orbit rotation), used for simple Lambert shading.
 function viewEye() {
-  const o = S.orbit, cy = Math.cos(o.yaw), sy = Math.sin(o.yaw), cp = Math.cos(o.pitch), sp = Math.sin(o.pitch);
-  return [TARGET[0] + sy * cp * o.dist, TARGET[1] - sp * o.dist, TARGET[2] - cy * cp * o.dist];
+  const o = S.orbit, c = S.cam3 || { target: TARGET, dist: 0.9 }, yaw = o.yaw + (c.yaw0 || 0), pitch = o.pitch + (c.pitch0 || 0);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  return [c.target[0] + sy * cp * c.dist, c.target[1] - sp * c.dist, c.target[2] - cy * cp * c.dist];
 }
+const LIGHT3 = norm([-0.35, -0.85, -0.4]);   // y is down in camera space: this light comes from above, left and behind the camera
 function hexRgb(hex) { const v = parseInt(hex.replace('#', ''), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
 function pushMesh(list, mesh, faces, col, P, eye) {
   const v = mesh.v, sign = mesh.sign || 0, n = v.length / 3, scr = new Array(n), [r, gg, b] = hexRgb(col);
@@ -931,8 +991,12 @@ function pushMesh(list, mesh, faces, col, P, eye) {
     const A = [v[3 * ia], v[3 * ia + 1], v[3 * ia + 2]], B = [v[3 * ib], v[3 * ib + 1], v[3 * ib + 2]], Cc = [v[3 * ic], v[3 * ic + 1], v[3 * ic + 2]];
     const nrm = norm(cross(sub(B, A), sub(Cc, A))), cen = mul(add(add(A, B), Cc), 1 / 3), facing = dot(nrm, norm(sub(eye, cen)));
     if (sign && facing * sign < 0) continue;   // back face of a closed mesh
-    // Lambert shading, quantised to 16 levels so consecutive same-shade triangles can share one canvas path.
-    const k = 0.35 + 0.65 * Math.round(15 * Math.abs(facing)) / 15;
+    if (scr[ia][2] <= NEAR3 || scr[ib][2] <= NEAR3 || scr[ic][2] <= NEAR3) continue;   // behind the viewer
+    // Key light from above the bench (fixed in camera space, so shading shows the hand's shape and turns with it),
+    // plus a weaker fill from the viewer. Quantised to 16 levels so same-shade triangles share one canvas path.
+    const out = mul(nrm, sign || Math.sign(facing) || 1);
+    const lit = 0.28 + 0.52 * Math.max(0, dot(out, LIGHT3)) + 0.25 * Math.abs(facing);
+    const k = Math.round(15 * Math.min(1, lit)) / 15;
     list.push({ kind: 'tri', d: (scr[ia][2] + scr[ib][2] + scr[ic][2]) / 3, pts: [scr[ia], scr[ib], scr[ic]], fill: `rgb(${(r * k) | 0},${(gg * k) | 0},${(b * k) | 0})` });
   }
 }
@@ -1499,7 +1563,7 @@ function applyLift(a, name) {
     if (!HAS_3D.has(h.state)) { notObserved++; continue; }   // 3D is never attached to predicted or lost hands
     const joints = []; for (let j = 0; j < 21; j++) { const o = (i * 21 + j) * 3; joints.push([J[o], J[o + 1], J[o + 2]]); }
     if (!joints.every((q) => q.every(Number.isFinite))) { rejected++; continue; }
-    rows.push({ h, joints, rmse: rm ? rm[i] : null });
+    rows.push({ h, joints, rmse: rm ? rm[i] : null, t: f.timestamp_s });
   }
   if (unmatched) throw new Error(`${unmatched} of ${n} rows reference frames or tracks that are not in the loaded run (a lift of a different run?)`);
   const lift = { name, tag: liftTag(name), rows: n, okRows: ok ? ok.reduce((c, v) => c + (v ? 1 : 0), 0) : n,
@@ -1513,7 +1577,7 @@ function applyLift(a, name) {
   for (const f of S.frames) for (const h of f.hands) if (h._preLift) clearLift(h);
   for (const { h, joints, rmse } of rows) {
     h._preLift = Object.fromEntries(LIFT_FIELDS.map((k) => [k, h[k]]));
-    h.cam_xyz_m = joints; h.cam_xyz_m_raw = joints;           // lift works on raw landmarks; there is no smoothed variant
+    h.cam_xyz_m = joints; h.cam_xyz_m_raw = joints;           // replaced by the smoothed copy below; raw is kept
     h.wrist_pose_cam = null;                                 // orientation is not exported by the lift
     h.grip_aperture_m = dist3(joints[4], joints[8]);
     h.quality = Object.assign({}, h.quality, { reprojection_error_px: rmse,
@@ -1521,11 +1585,70 @@ function applyLift(a, name) {
     h.provenance = Object.assign({}, h.provenance, { cam_xyz_m: 'inferred', grip_aperture_m: 'inferred' });
     h._lift = name;
   }
+  const smoothed = smoothCam(rows);
   S.lift = { name, tag: lift.tag, rows: n, okRows: lift.okRows, rmseMedian: lift.rmseMedian, merged: rows.length, summary: summary ? summary.name : null,
-    get pairs() { return S.frames.flatMap((f) => f.hands.filter((h) => h._lift === name && h.image_xyz_raw).map((h) => ({ joints: h.cam_xyz_m, img: h.image_xyz_raw }))).slice(0, 300); } };
+    get pairs() { return S.frames.flatMap((f) => f.hands.filter((h) => h._lift === name && h.image_xyz_raw).map((h) => ({ joints: h.cam_xyz_m_raw, img: h.image_xyz_raw }))).slice(0, 300); } };
   S.camera = summary ? liftLens(summary) : null;            // without the summary the lens is unknown; nothing is assumed
-  return `${rows.length} hands in camera space` + (replaced ? ` (replaces ${replaced})` : '') + (rejected ? `, ${rejected} rejected by the lift` : '') +
+  return `${rows.length} hands in camera space (${smoothed} smoothed over time)` + (replaced ? ` (replaces ${replaced})` : '') + (rejected ? `, ${rejected} rejected by the lift` : '') +
     (notObserved ? `, ${notObserved} skipped (hand not observed)` : '') + (summary ? `, lens from ${summary.name}` : '; lens not loaded: add the matching lift_*.json');
+}
+// Camera-space 3D smoothing. The single-camera lift is noisy along the viewing axis: on the dev clip the wrist depth
+// jumps by a median of 3.1 cm between consecutive frames (90th percentile 10.5 cm), against 2.4 cm sideways, which
+// makes the 3D hands shake back and forth. Each track's consecutive lifted frames (gaps up to 0.2 s) go through a
+// constant-velocity Kalman filter forward and a Rauch-Tung-Striebel pass backward (no lag; same method as the 2D
+// wrist): the wrist position with a larger measurement noise along depth than sideways, the 20 other joints relative
+// to the wrist. The raw lift stays in cam_xyz_m_raw (the "Raw" button shows it).
+const CAM_SMOOTH = { gap: 0.2, q: 3.0, rWrist: [0.006, 0.006, 0.03], rShape: 0.004 };   // m/s^2, m
+function rts1(t, y, q, r) {
+  const n = y.length, xf = new Array(n), Pf = new Array(n), xp = new Array(n), Pp = new Array(n);
+  let x = [y[0], 0], P = [r * r, 0, 0, 1];   // P = [p00, p01, p10, p11]
+  for (let i = 0; i < n; i++) {
+    if (i) {
+      const dt = Math.max(t[i] - t[i - 1], 1e-3), q2 = q * q;
+      x = [x[0] + dt * x[1], x[1]];
+      const a = P[0] + dt * (P[1] + P[2]) + dt * dt * P[3], b = P[1] + dt * P[3], c = P[2] + dt * P[3], d = P[3];
+      P = [a + q2 * dt ** 4 / 4, b + q2 * dt ** 3 / 2, c + q2 * dt ** 3 / 2, d + q2 * dt * dt];
+    }
+    xp[i] = x; Pp[i] = P;
+    const s = P[0] + r * r, k0 = P[0] / s, k1 = P[2] / s, e = y[i] - x[0];
+    x = [x[0] + k0 * e, x[1] + k1 * e];
+    P = [(1 - k0) * P[0], (1 - k0) * P[1], P[2] - k1 * P[0], P[3] - k1 * P[1]];
+    xf[i] = x; Pf[i] = P;
+  }
+  const out = new Array(n); let xs = xf[n - 1]; out[n - 1] = xs[0];
+  for (let i = n - 2; i >= 0; i--) {
+    const dt = Math.max(t[i + 1] - t[i], 1e-3), F = Pf[i], N = Pp[i + 1];
+    const PF = [F[0] + dt * F[1], F[1], F[2] + dt * F[3], F[3]];          // Pf * F^T
+    const det = N[0] * N[3] - N[1] * N[2] || 1e-12, inv = [N[3] / det, -N[1] / det, -N[2] / det, N[0] / det];
+    const C = [PF[0] * inv[0] + PF[1] * inv[2], PF[0] * inv[1] + PF[1] * inv[3], PF[2] * inv[0] + PF[3] * inv[2], PF[2] * inv[1] + PF[3] * inv[3]];
+    const d0 = xs[0] - xp[i + 1][0], d1 = xs[1] - xp[i + 1][1];
+    xs = [xf[i][0] + C[0] * d0 + C[1] * d1, xf[i][1] + C[2] * d0 + C[3] * d1];
+    out[i] = xs[0];
+  }
+  return out;
+}
+function smoothCam(rows) {
+  const byTrack = new Map();
+  for (const r of rows) { const k = r.h.track_id; if (!byTrack.has(k)) byTrack.set(k, []); byTrack.get(k).push(r); }
+  let count = 0;
+  for (const list of byTrack.values()) {
+    list.sort((a, b) => a.t - b.t);
+    const segments = []; let cur = [];
+    for (const r of list) { if (cur.length && r.t - cur[cur.length - 1].t > CAM_SMOOTH.gap) { segments.push(cur); cur = []; } cur.push(r); }
+    if (cur.length) segments.push(cur);
+    for (const segm of segments) {
+      if (segm.length < 3) continue;
+      const t = segm.map((r) => r.t), out = segm.map(() => []);
+      const wrist = [0, 1, 2].map((k) => rts1(t, segm.map((r) => r.joints[0][k]), CAM_SMOOTH.q, CAM_SMOOTH.rWrist[k]));
+      for (let j = 0; j < 21; j++) {
+        const rel = j ? [0, 1, 2].map((k) => rts1(t, segm.map((r) => r.joints[j][k] - r.joints[0][k]), CAM_SMOOTH.q, CAM_SMOOTH.rShape)) : null;
+        segm.forEach((_, i) => out[i].push([0, 1, 2].map((k) => wrist[k][i] + (rel ? rel[k][i] : 0))));
+      }
+      segm.forEach((r, i) => { r.h.cam_xyz_m = out[i]; });
+      count += segm.length;
+    }
+  }
+  return count;
 }
 async function addResultFile(file) {
   const name = file.name.toLowerCase();
@@ -1682,10 +1805,12 @@ bindSeg('segLayout', (v) => setSplit(+v));
 })();
 $('chkWire').addEventListener('change', (e) => { S.wireframe = e.target.checked; S.dirty = true; });
 $('rngOpacity').addEventListener('input', (e) => { S.meshOpacity = +e.target.value; S.dirty = true; });
-$('btnCamReset').addEventListener('click', () => { S.orbit = { yaw: -0.12, pitch: 0.62, dist: 0.9 }; S.dirty = true; });
+$('btnCamReset').addEventListener('click', () => { S.orbit = { ...VIEWS3[S.view3], zoom: 1 }; S.dirty = true; });
 document.body.classList.add('ws-review');
 bindSeg('segSmooth', (v) => { S.smooth = v === 'smooth'; S.dirty = true; });
 bindSeg('segDisplay', (v) => { S.display = v; S.dirty = true; });
+bindSeg('segView3', (v) => { S.view3 = v; S.orbit = { ...VIEWS3[v], zoom: 1 }; S.dirty = true; });
+$('chkFollow').addEventListener('change', (e) => { S.follow = e.target.checked; S.dirty = true; });
 bindSeg('segEvents', (v) => { S.eventFilter = v; renderEvents(); S.dirty = true; });
 for (const id of ['chkTrails']) $(id).addEventListener('change', () => (S.dirty = true));
 $('expEvents').addEventListener('click', exportEvents);
@@ -1711,8 +1836,8 @@ document.addEventListener('keydown', (e) => {
   cv.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, yaw: S.orbit.yaw, pitch: S.orbit.pitch }; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; });
   cv.addEventListener('pointermove', (e) => { if (!drag) return; S.orbit.yaw = drag.yaw + (e.clientX - drag.x) * 0.008; S.orbit.pitch = clamp(drag.pitch + (e.clientY - drag.y) * 0.006, -1.2, 1.3); S.dirty = true; });
   cv.addEventListener('pointerup', () => { drag = null; cv.style.cursor = 'grab'; });
-  cv.addEventListener('wheel', (e) => { e.preventDefault(); S.orbit.dist = clamp(S.orbit.dist * Math.exp(e.deltaY * 0.001), 0.4, 4); S.dirty = true; }, { passive: false });
-  cv.addEventListener('dblclick', () => { S.orbit = { yaw: -0.12, pitch: 0.62, dist: 0.9 }; S.dirty = true; });
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); S.orbit.zoom = clamp((S.orbit.zoom || 1) * Math.exp(e.deltaY * 0.001), 0.3, 5); S.dirty = true; }, { passive: false });
+  cv.addEventListener('dblclick', () => { S.orbit = { ...VIEWS3[S.view3], zoom: 1 }; S.dirty = true; });
 })();
 (() => {
   const cv = $('cvLanes'); let drag = null, pending = null;

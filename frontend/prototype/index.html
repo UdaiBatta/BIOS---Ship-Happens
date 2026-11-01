@@ -119,11 +119,15 @@
   /* Frame details changes on every frame (1 or 2 hands, notes, wrapped values). In the wide layout it must not
      size the row it shares with the video and 3D panels, or the timeline below jumps during playback:
      contain: size makes the grid ignore its content height, the panel stretches to the row and scrolls inside. */
-  @media (min-width: 1251px) {
-    body:not(.ws-analysis) #p-inspect { contain: size; align-self: stretch; min-height: 0; }
-    body:not(.ws-analysis) #inspector { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  /* "not ... (max-width)" is the exact complement of the narrow layout below, so fractional widths (zoom, display
+     scaling) between 1250 and 1251 px are covered too. Applies in every workspace (in Analysis it shares the
+     timeline's row). */
+  @media not all and (max-width: 1250px) {
+    #p-inspect { contain: size; align-self: stretch; min-height: 0; }
+    #inspector { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
   }
-  @media (max-width: 1250px) { #inspector { max-height: 460px; overflow-y: auto; scrollbar-gutter: stable; } }
+  /* Narrow layout: a fixed height, so the panels below it do not move either. */
+  @media (max-width: 1250px) { #inspector { height: 460px; overflow-y: auto; scrollbar-gutter: stable; } }
 
   .stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--page); border-radius: 6px; overflow: hidden; }
   .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -166,7 +170,7 @@
   .tooltip .row .lab { color: var(--ink-2); }
 
   table.inspect { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; table-layout: fixed; }
-  table.inspect td, table.inspect th { overflow-wrap: anywhere; }
+  table.inspect td, table.inspect th { overflow-wrap: break-word; }
   table.inspect td.k, table.inspect th:first-child { width: 42%; }
   table.inspect.hands td.k, table.inspect.hands th:first-child { width: 30%; }
   table.inspect th, table.inspect td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--grid); vertical-align: top; }
@@ -1383,7 +1387,7 @@ function renderInspectorBody(box) {
   const t1 = el('table', { class: 'inspect' }), tb1 = el('tbody');
   const kv = (k, v, cls) => { const tr = el('tr'); tr.append(el('td', { class: 'k' }, k)); const td = el('td', cls ? { class: cls } : {}, v); tr.append(td); tb1.append(tr); };
   kv('Frame · time', `${f.frame_index} · ${fmtT(f.timestamp_s)}`);
-  if (S.avail.blur) kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : num(q.blur_laplacian_var, 0));
+  if (S.avail.blur) kv('Blur (Laplacian var.)', q.blur_laplacian_var == null ? '—' : num(q.blur_laplacian_var, q.blur_laplacian_var < 10 ? 1 : 0));
   for (const [k, lab] of [['hand_observed', 'Hand observed'], ['low_blur', 'Low blur'], ['cam_space_valid', 'Camera lift accepted']])
     if (k === 'hand_observed' || S.lanes.some((L) => L.key === k)) kv(lab, m[k] === true ? '✓ yes' : m[k] === false ? '✕ no' : 'n/a', m[k] === true ? 'ok' : m[k] === false ? 'bad' : 'na');
   t1.append(tb1); box.append(t1);

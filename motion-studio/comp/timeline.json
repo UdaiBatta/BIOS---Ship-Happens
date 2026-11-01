@@ -1,0 +1,178 @@
+{
+ "bpm": 120,
+ "duration": 20.0,
+ "fps": 60,
+ "sections": [
+  {
+   "id": "hook",
+   "t0": 0.0,
+   "t1": 3.0,
+   "label": "01 / THE PROBLEM"
+  },
+  {
+   "id": "product",
+   "t0": 3.0,
+   "t1": 7.0,
+   "label": "02 / MOTIONIQ"
+  },
+  {
+   "id": "f1",
+   "t0": 7.0,
+   "t1": 10.0,
+   "label": "03 / HANDS IN 3D"
+  },
+  {
+   "id": "f2",
+   "t0": 10.0,
+   "t1": 13.0,
+   "label": "04 / TIMELINE"
+  },
+  {
+   "id": "f3",
+   "t0": 13.0,
+   "t1": 16.0,
+   "label": "05 / EVENTS"
+  },
+  {
+   "id": "metric",
+   "t0": 16.0,
+   "t1": 20.0,
+   "label": "06 / PROOF"
+  }
+ ],
+ "words": [
+  [
+   "WHICH",
+   0.0
+  ],
+  [
+   "SECONDS",
+   0.5
+  ],
+  [
+   "CAN",
+   1.0
+  ],
+  [
+   "YOU",
+   1.5
+  ],
+  [
+   "TRUST?",
+   2.0
+  ]
+ ],
+ "hookZoom": [
+  2.75,
+  3.0
+ ],
+ "drop": 3.0,
+ "panels": [
+  [
+   "header",
+   4.0
+  ],
+  [
+   "controls",
+   4.25
+  ],
+  [
+   "video",
+   4.5
+  ],
+  [
+   "three",
+   4.75
+  ],
+  [
+   "lanes",
+   5.0
+  ],
+  [
+   "inspect",
+   5.25
+  ],
+  [
+   "events",
+   5.5
+  ]
+ ],
+ "productCaptions": [
+  [
+   "HEAD-CAM VIDEO IN.",
+   5.5
+  ],
+  [
+   "3D HAND MOTION OUT.",
+   5.875
+  ],
+  [
+   "OFFLINE \u00b7 ON A CPU",
+   6.25
+  ]
+ ],
+ "live": [
+  5.5,
+  6.75
+ ],
+ "f1": {
+  "enter": 7.0,
+  "press": 7.5,
+  "release": 9.25,
+  "chips": [
+   9.25,
+   9.5
+  ],
+  "wipe": [
+   9.75,
+   10.25
+  ]
+ },
+ "f2": {
+  "enter": 10.0,
+  "press": 10.5,
+  "release": 12.25,
+  "wipe": [
+   12.75,
+   13.25
+  ]
+ },
+ "f3": {
+  "enter": 13.0,
+  "clickFilter": 13.5,
+  "hoverEvent": 14.25,
+  "clickEvent": 14.5,
+  "push": [
+   15.0,
+   15.75
+  ],
+  "collapse": [
+   15.75,
+   16.0
+  ]
+ },
+ "metric": {
+  "countStart": 16.0,
+  "lock": 17.0,
+  "collapse": [
+   17.75,
+   18.0
+  ],
+  "lockup": 18.0,
+  "fadeOut": [
+   19.7,
+   20.0
+  ]
+ },
+ "wordmark": {
+  "slam": 3.0,
+  "morph": [
+   3.75,
+   4.0
+  ]
+ },
+ "zoomToF1": [
+  6.75,
+  7.0
+ ]
+}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MOTIONIQ showreel comp</title>
+<style>
+  :root {
+    --page: #0d0d0d; --surface: #1a1a19; --surface2: #222221; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --left: #d95926; --right: #3987e5; --warn: #fab219; --good: #0ca30c;
+    /* Deck typeface (slides/MOTIONIQ.pptx is set in Arial; Liberation Sans is its metric clone here) */
+    --head: Arial, "Liberation Sans", sans-serif;
+    /* Product UI typeface (frontend/prototype/index.html --font) */
+    --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "DejaVu Sans Mono", "Liberation Mono", monospace;
+  }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  #stage { position: relative; overflow: hidden; background: var(--page); color: var(--ink); }
+  .abs { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .ctr { transform-origin: 50% 50%; }
+  .layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  .head { font-family: var(--head); font-weight: 700; text-transform: uppercase; letter-spacing: -0.03em; line-height: 0.9; white-space: nowrap; }
+  .mono { font-family: var(--mono); }
+  .mask { overflow: hidden; padding: 0.04em 0.02em 0.06em; margin: -0.04em -0.02em -0.06em; }
+  .mask > div { transform-origin: 0 100%; will-change: transform; }
+  .card-clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; background: var(--page);
+    box-shadow: 0 40px 90px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.09); }
+  .card-clip img { position: absolute; left: 0; top: 0; display: block; }
+  .tag { position: absolute; font-family: var(--head); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    white-space: nowrap; padding: 0.35em 0.6em 0.3em; border-radius: 0.3em; line-height: 1; }
+  .ring { position: absolute; border-radius: 50%; border: 3px solid var(--left); transform-origin: 50% 50%; pointer-events: none; }
+  img { image-rendering: auto; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script src="data.js"></script>
+<script src="comp.js"></script>
+</body>
+</html>
